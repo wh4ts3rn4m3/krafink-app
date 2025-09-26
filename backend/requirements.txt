@@ -28,3 +28,4 @@ websockets>=15.0.1
 python-socketio>=5.13.0
 eventlet>=0.40.3
 pillow>=11.3.0
+aiofiles>=24.1.0
