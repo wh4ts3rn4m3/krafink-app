@@ -1,6 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import axios from "axios";
+import io from "socket.io-client";
 import "./App.css";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -9,11 +10,22 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar";
 import { Badge } from "./components/ui/badge";
 import { Separator } from "./components/ui/separator";
-import { Heart, MessageCircle, Search, User, Home, Settings, LogOut, Plus, Send } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "./components/ui/sheet";
+import { 
+  Heart, MessageCircle, Search, User, Home, Settings, LogOut, Plus, Send, 
+  Bell, Bookmark, Share, MoreHorizontal, Edit, Trash, Flag, UserX,
+  Image as ImageIcon, Smile, Hash, AtSign, X, Users, Eye, EyeOff,
+  MessageSquare, Compass, Menu, Upload, Camera, Loader2
+} from "lucide-react";
 import { toast } from "sonner";
+import { useInView } from "react-intersection-observer";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+// Socket.IO connection
+let socket = null;
 
 // Auth Context
 const AuthContext = createContext();
@@ -39,6 +51,36 @@ const AuthProvider = ({ children }) => {
       setLoading(false);
     }
   }, [token]);
+
+  useEffect(() => {
+    if (user && token && !socket) {
+      // Initialize socket connection
+      socket = io(BACKEND_URL);
+      
+      socket.on('connect', () => {
+        console.log('Connected to server');
+        // Join user room for notifications
+        socket.emit('join_user', { user_id: user.id });
+      });
+
+      socket.on('notification', (data) => {
+        toast.info(data.notification.message);
+        // Update notification count if needed
+      });
+
+      socket.on('message_received', (data) => {
+        // Handle real-time messages
+        console.log('Message received:', data);
+      });
+
+      return () => {
+        if (socket) {
+          socket.disconnect();
+          socket = null;
+        }
+      };
+    }
+  }, [user, token]);
 
   const fetchCurrentUser = async () => {
     try {
@@ -91,6 +133,10 @@ const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
+    if (socket) {
+      socket.disconnect();
+      socket = null;
+    }
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
@@ -104,6 +150,43 @@ const AuthProvider = ({ children }) => {
     </AuthContext.Provider>
   );
 };
+
+// Notification Context
+const NotificationContext = createContext();
+
+const NotificationProvider = ({ children }) => {
+  const [unreadCount, setUnreadCount] = useState(0);
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      fetchUnreadCount();
+      // Set up real-time updates
+      if (socket) {
+        socket.on('notification', () => {
+          setUnreadCount(prev => prev + 1);
+        });
+      }
+    }
+  }, [user]);
+
+  const fetchUnreadCount = async () => {
+    try {
+      const response = await axios.get(`${API}/notifications/unread-count`);
+      setUnreadCount(response.data.count);
+    } catch (error) {
+      console.error('Failed to fetch notification count:', error);
+    }
+  };
+
+  return (
+    <NotificationContext.Provider value={{ unreadCount, setUnreadCount, fetchUnreadCount }}>
+      {children}
+    </NotificationContext.Provider>
+  );
+};
+
+const useNotifications = () => useContext(NotificationContext);
 
 // Auth Components
 const AuthPage = () => {
@@ -216,10 +299,12 @@ const AuthPage = () => {
   );
 };
 
-// Navigation Component
-const Navbar = () => {
+// Navigation Components
+const DesktopNavigation = () => {
   const { user, logout } = useAuth();
-  const [searchQuery, setSearchQuery] = useState('');
+  const { unreadCount } = useNotifications();
+  const [showCreatePost, setShowCreatePost] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   return (
     <nav className="bg-white/90 backdrop-blur-md border-b border-purple-100 sticky top-0 z-50">
@@ -229,30 +314,44 @@ const Navbar = () => {
             krafink
           </div>
           
-          <div className="flex-1 max-w-md mx-8">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-              <Input
-                type="text"
-                placeholder="Search users..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-                data-testid="search-input"
-              />
-            </div>
-          </div>
+          <SearchBar />
           
           <div className="flex items-center space-x-4">
-            <Button variant="ghost" size="sm" data-testid="home-btn">
-              <Home className="h-5 w-5" />
+            <NavButton to="/feed" icon={Home} label="Home" />
+            <NavButton to="/explore" icon={Compass} label="Explore" />
+            
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setShowCreatePost(true)}
+              data-testid="create-post-nav-btn"
+            >
+              <Plus className="h-5 w-5" />
             </Button>
-            <Button variant="ghost" size="sm" data-testid="profile-btn">
-              <User className="h-5 w-5" />
-            </Button>
+            
+            <div className="relative">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowNotifications(!showNotifications)}
+                data-testid="notifications-btn"
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <Badge className="absolute -top-1 -right-1 h-5 w-5 p-0 text-xs bg-red-500">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </Badge>
+                )}
+              </Button>
+            </div>
+            
+            <NavButton to="/messages" icon={MessageSquare} label="Messages" />
+            <NavButton to={`/@${user?.username}`} icon={User} label="Profile" />
+            
             <Button variant="ghost" size="sm" onClick={logout} data-testid="logout-btn">
               <LogOut className="h-5 w-5" />
             </Button>
+            
             <Avatar className="h-8 w-8">
               <AvatarImage src={user?.avatar} />
               <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
@@ -260,346 +359,184 @@ const Navbar = () => {
           </div>
         </div>
       </div>
+
+      <CreatePostModal isOpen={showCreatePost} onClose={() => setShowCreatePost(false)} />
+      {showNotifications && (
+        <NotificationsDropdown onClose={() => setShowNotifications(false)} />
+      )}
     </nav>
   );
 };
 
-// Post Creation Component
-const CreatePost = ({ onPostCreated }) => {
-  const [content, setContent] = useState('');
-  const [loading, setLoading] = useState(false);
+const MobileNavigation = () => {
   const { user } = useAuth();
+  const { unreadCount } = useNotifications();
+  const location = useLocation();
+  const [showCreatePost, setShowCreatePost] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!content.trim()) return;
-    
-    setLoading(true);
-    try {
-      const response = await axios.post(`${API}/posts`, {
-        content: content.trim(),
-        visibility: 'public'
-      });
-      
-      setContent('');
-      toast.success("Post created!");
-      if (onPostCreated) onPostCreated();
-    } catch (error) {
-      toast.error("Failed to create post");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const navItems = [
+    { to: "/feed", icon: Home, label: "Home" },
+    { to: "/explore", icon: Compass, label: "Explore" },
+    { action: () => setShowCreatePost(true), icon: Plus, label: "Create" },
+    { to: "/messages", icon: MessageSquare, label: "Messages" },
+    { to: `/@${user?.username}`, icon: User, label: "Profile" }
+  ];
 
   return (
-    <Card className="mb-6">
-      <CardContent className="pt-6">
-        <form onSubmit={handleSubmit}>
-          <div className="flex space-x-4">
-            <Avatar className="h-10 w-10">
-              <AvatarImage src={user?.avatar} />
-              <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1">
-              <Textarea
-                placeholder="What's on your mind?"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="min-h-[100px] border-0 resize-none focus:ring-0 p-0 text-base"
-                data-testid="post-content-input"
-              />
-              <div className="flex justify-end mt-4">
-                <Button 
-                  type="submit" 
-                  disabled={!content.trim() || loading}
-                  className="bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600"
-                  data-testid="create-post-btn"
-                >
-                  {loading ? "Posting..." : "Post"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
-  );
-};
-
-// Post Component
-const PostCard = ({ post, author, userLiked, onLikeToggle, onCommentAdded }) => {
-  const [showComments, setShowComments] = useState(false);
-  const [comments, setComments] = useState([]);
-  const [newComment, setNewComment] = useState('');
-  const [commentLoading, setCommentLoading] = useState(false);
-
-  const fetchComments = async () => {
-    try {
-      const response = await axios.get(`${API}/posts/${post.id}/comments`);
-      setComments(response.data);
-    } catch (error) {
-      toast.error("Failed to load comments");
-    }
-  };
-
-  const handleLike = async () => {
-    try {
-      await axios.post(`${API}/posts/${post.id}/like`);
-      if (onLikeToggle) onLikeToggle(post.id);
-    } catch (error) {
-      toast.error("Failed to like post");
-    }
-  };
-
-  const handleComment = async (e) => {
-    e.preventDefault();
-    if (!newComment.trim()) return;
-    
-    setCommentLoading(true);
-    try {
-      await axios.post(`${API}/posts/${post.id}/comments`, {
-        content: newComment.trim()
-      });
-      
-      setNewComment('');
-      fetchComments();
-      toast.success("Comment added!");
-      if (onCommentAdded) onCommentAdded(post.id);
-    } catch (error) {
-      toast.error("Failed to add comment");
-    } finally {
-      setCommentLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (showComments) {
-      fetchComments();
-    }
-  }, [showComments]);
-
-  return (
-    <Card className="mb-6" data-testid={`post-${post.id}`}>
-      <CardContent className="pt-6">
-        <div className="flex items-start space-x-4">
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={author?.avatar} />
-            <AvatarFallback>{author?.name?.[0]?.toUpperCase()}</AvatarFallback>
-          </Avatar>
-          
-          <div className="flex-1">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="font-semibold text-gray-900">{author?.name}</span>
-              <span className="text-gray-500">@{author?.username}</span>
-              <span className="text-gray-400">·</span>
-              <span className="text-gray-500 text-sm">
-                {new Date(post.created_at).toLocaleDateString()}
-              </span>
-            </div>
-            
-            <p className="text-gray-800 mb-4 whitespace-pre-wrap">{post.content}</p>
-            
-            <div className="flex items-center space-x-6 text-gray-500">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleLike}
-                className={`flex items-center space-x-1 ${userLiked ? 'text-pink-500' : ''}`}
-                data-testid={`like-btn-${post.id}`}
-              >
-                <Heart className={`h-4 w-4 ${userLiked ? 'fill-current' : ''}`} />
-                <span>{post.likes_count}</span>
-              </Button>
-              
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowComments(!showComments)}
-                className="flex items-center space-x-1"
-                data-testid={`comment-btn-${post.id}`}
-              >
-                <MessageCircle className="h-4 w-4" />
-                <span>{post.comments_count}</span>
-              </Button>
-            </div>
-            
-            {showComments && (
-              <div className="mt-4 space-y-4">
-                <Separator />
-                
-                {/* Comment form */}
-                <form onSubmit={handleComment} className="flex space-x-2">
-                  <Input
-                    type="text"
-                    placeholder="Add a comment..."
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    className="flex-1"
-                    data-testid={`comment-input-${post.id}`}
-                  />
-                  <Button 
-                    type="submit" 
-                    size="sm" 
-                    disabled={!newComment.trim() || commentLoading}
-                    data-testid={`comment-submit-${post.id}`}
-                  >
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </form>
-                
-                {/* Comments list */}
-                <div className="space-y-3">
-                  {comments.map(({ comment, author }) => (
-                    <div key={comment.id} className="flex space-x-2">
-                      <Avatar className="h-6 w-6">
-                        <AvatarImage src={author?.avatar} />
-                        <AvatarFallback className="text-xs">{author?.name?.[0]?.toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1">
-                        <div className="bg-gray-50 rounded-lg p-3">
-                          <div className="flex items-center space-x-1 mb-1">
-                            <span className="font-medium text-sm">{author?.name}</span>
-                            <span className="text-gray-500 text-xs">@{author?.username}</span>
-                          </div>
-                          <p className="text-sm text-gray-800">{comment.content}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
-// Feed Component
-const Feed = () => {
-  const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchFeed = async () => {
-    try {
-      const response = await axios.get(`${API}/posts/feed`);
-      setPosts(response.data);
-    } catch (error) {
-      toast.error("Failed to load feed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleLikeToggle = (postId) => {
-    setPosts(posts.map(item => {
-      if (item.post.id === postId) {
-        return {
-          ...item,
-          post: {
-            ...item.post,
-            likes_count: item.user_liked ? item.post.likes_count - 1 : item.post.likes_count + 1
-          },
-          user_liked: !item.user_liked
-        };
-      }
-      return item;
-    }));
-  };
-
-  const handleCommentAdded = (postId) => {
-    setPosts(posts.map(item => {
-      if (item.post.id === postId) {
-        return {
-          ...item,
-          post: {
-            ...item.post,
-            comments_count: item.post.comments_count + 1
-          }
-        };
-      }
-      return item;
-    }));
-  };
-
-  useEffect(() => {
-    fetchFeed();
-  }, []);
-
-  return (
-    <div className="max-w-2xl mx-auto py-6 px-4">
-      <CreatePost onPostCreated={fetchFeed} />
-      
-      {loading ? (
-        <div className="text-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto"></div>
-          <p className="mt-2 text-gray-500">Loading your feed...</p>
-        </div>
-      ) : posts.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <p className="text-gray-500 mb-4">Your feed is empty!</p>
-            <p className="text-gray-400 text-sm">
-              Start following some creators or create your first post.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div data-testid="feed-posts">
-          {posts.map(({ post, author, user_liked }) => (
-            <PostCard
-              key={post.id}
-              post={post}
-              author={author}
-              userLiked={user_liked}
-              onLikeToggle={handleLikeToggle}
-              onCommentAdded={handleCommentAdded}
-            />
+    <>
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-purple-100 z-50">
+        <div className="flex items-center justify-around py-2">
+          {navItems.map((item, index) => (
+            <Button
+              key={index}
+              variant="ghost"
+              size="sm"
+              className={`flex flex-col items-center space-y-1 ${
+                item.to === location.pathname ? 'text-purple-600' : 'text-gray-600'
+              }`}
+              onClick={item.action || (() => window.location.href = item.to)}
+            >
+              <item.icon className="h-5 w-5" />
+              <span className="text-xs">{item.label}</span>
+              {item.label === "Messages" && unreadCount > 0 && (
+                <Badge className="absolute top-0 right-0 h-4 w-4 p-0 text-xs bg-red-500">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </Badge>
+              )}
+            </Button>
           ))}
         </div>
+      </nav>
+      
+      <CreatePostModal isOpen={showCreatePost} onClose={() => setShowCreatePost(false)} />
+    </>
+  );
+};
+
+const NavButton = ({ to, icon: Icon, label }) => {
+  const location = useLocation();
+  const isActive = location.pathname === to;
+  
+  return (
+    <Button 
+      variant="ghost" 
+      size="sm" 
+      className={isActive ? 'text-purple-600' : ''}
+      onClick={() => window.location.href = to}
+    >
+      <Icon className="h-5 w-5" />
+      <span className="sr-only">{label}</span>
+    </Button>
+  );
+};
+
+const SearchBar = () => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState({ users: [], posts: [] });
+  const [showResults, setShowResults] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleSearch = async (query) => {
+    if (!query.trim()) {
+      setSearchResults({ users: [], posts: [] });
+      setShowResults(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API}/search?q=${encodeURIComponent(query)}`);
+      setSearchResults(response.data);
+      setShowResults(true);
+    } catch (error) {
+      toast.error("Search failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const debounce = setTimeout(() => {
+      handleSearch(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(debounce);
+  }, [searchQuery]);
+
+  return (
+    <div className="flex-1 max-w-md mx-8 relative">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+        <Input
+          type="text"
+          placeholder="Search users and posts..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-10"
+          data-testid="search-input"
+        />
+        {loading && (
+          <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin" />
+        )}
+      </div>
+
+      {showResults && (
+        <Card className="absolute top-full mt-2 w-full max-h-96 overflow-y-auto z-50">
+          <CardContent className="p-0">
+            {searchResults.users.length > 0 && (
+              <div className="p-4">
+                <h3 className="font-semibold text-sm text-gray-600 mb-2">People</h3>
+                {searchResults.users.map((user) => (
+                  <div 
+                    key={user.id} 
+                    className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    onClick={() => {
+                      window.location.href = `/@${user.username}`;
+                      setShowResults(false);
+                    }}
+                  >
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={user.avatar} />
+                      <AvatarFallback>{user.name[0]}</AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium text-sm">{user.name}</p>
+                      <p className="text-gray-500 text-xs">@{user.username}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {searchResults.posts.length > 0 && (
+              <div className="p-4 border-t">
+                <h3 className="font-semibold text-sm text-gray-600 mb-2">Posts</h3>
+                {searchResults.posts.map(({ post, author }) => (
+                  <div 
+                    key={post.id} 
+                    className="p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    onClick={() => {
+                      window.location.href = `/post/${post.id}`;
+                      setShowResults(false);
+                    }}
+                  >
+                    <p className="text-sm truncate">{post.content}</p>
+                    <p className="text-xs text-gray-500">by @{author.username}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {searchResults.users.length === 0 && searchResults.posts.length === 0 && searchQuery && (
+              <div className="p-4 text-center text-gray-500">
+                No results found for "{searchQuery}"
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );
 };
 
-// Main App Component
-const AppContent = () => {
-  const { user, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <AuthPage />;
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50">
-      <Navbar />
-      <main>
-        <Routes>
-          <Route path="/" element={<Feed />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-    </div>
-  );
-};
-
-function App() {
-  return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppContent />
-      </BrowserRouter>
-    </AuthProvider>
-  );
-}
-
-export default App;
+// Continue with more components in next message...
