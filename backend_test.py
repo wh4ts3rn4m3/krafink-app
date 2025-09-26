@@ -204,12 +204,12 @@ class KrafinkAPITester:
         success, response = self.run_test(
             "Search Users",
             "GET",
-            "search/users?q=test&limit=5",
+            "search?q=test&type=users&limit=5",
             200
         )
         
-        if success and isinstance(response, list):
-            return True, response
+        if success and isinstance(response, dict) and 'users' in response:
+            return True, response['users']
         return False, []
 
     def test_get_user_by_username(self):
