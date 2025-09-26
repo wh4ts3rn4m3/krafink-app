@@ -137,3 +137,20 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Next.js / Vercel
+.next/
+out/
+.vercel/
+
+# Env (keep only the example)
+.env
+.env.*
+!.env.example
+
+# Optional: local dev DBs
+prisma/*.db
+prisma/*.db-journal
+*.sqlite
+*.db
+*.db-journal
