@@ -737,4 +737,603 @@ async def delete_post(post_id: str, current_user: User = Depends(get_current_use
     
     return {"message": "Post deleted successfully"}
 
-# Continue in next message due to length...
+# Comment Routes
+@api_router.get("/posts/{post_id}/comments", response_model=List[dict])
+async def get_post_comments(post_id: str, current_user: User = Depends(get_current_user)):
+    comments_cursor = db.comments.find({"post_id": post_id, "parent_id": None}).sort("created_at", 1)
+    comments = await comments_cursor.to_list(None)
+    
+    enriched_comments = []
+    for comment_doc in comments:
+        comment_doc = parse_from_mongo(comment_doc)
+        comment = Comment(**comment_doc)
+        
+        # Get author info
+        author_doc = await db.users.find_one({"id": comment.author_id})
+        if author_doc:
+            author_doc = parse_from_mongo(author_doc)
+            author = User(**{k: v for k, v in author_doc.items() if k != 'password'})
+            
+            # Check if user liked this comment
+            user_liked = await db.likes.find_one({
+                "user_id": current_user.id,
+                "target_id": comment.id,
+                "target_type": "comment"
+            }) is not None
+            
+            # Get replies
+            replies_cursor = db.comments.find({"parent_id": comment.id}).sort("created_at", 1)
+            replies = await replies_cursor.to_list(None)
+            
+            enriched_replies = []
+            for reply_doc in replies:
+                reply_doc = parse_from_mongo(reply_doc)
+                reply = Comment(**reply_doc)
+                
+                reply_author_doc = await db.users.find_one({"id": reply.author_id})
+                if reply_author_doc:
+                    reply_author_doc = parse_from_mongo(reply_author_doc)
+                    reply_author = User(**{k: v for k, v in reply_author_doc.items() if k != 'password'})
+                    
+                    enriched_replies.append({
+                        "comment": reply.dict(),
+                        "author": reply_author.dict(),
+                        "user_liked": await db.likes.find_one({
+                            "user_id": current_user.id,
+                            "target_id": reply.id,
+                            "target_type": "comment"
+                        }) is not None
+                    })
+            
+            enriched_comments.append({
+                "comment": comment.dict(),
+                "author": author.dict(),
+                "user_liked": user_liked,
+                "replies": enriched_replies
+            })
+    
+    return enriched_comments
+
+@api_router.post("/posts/{post_id}/comments", response_model=Comment)
+async def create_comment(post_id: str, comment_data: CommentCreate, current_user: User = Depends(get_current_user)):
+    # Check if post exists
+    post_doc = await db.posts.find_one({"id": post_id})
+    if not post_doc:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    comment = Comment(post_id=post_id, author_id=current_user.id, **comment_data.dict())
+    comment_doc = prepare_for_mongo(comment.dict())
+    
+    await db.comments.insert_one(comment_doc)
+    
+    # Update post comments count
+    await db.posts.update_one(
+        {"id": post_id},
+        {"$inc": {"comments_count": 1}}
+    )
+    
+    # Update parent comment replies count if it's a reply
+    if comment_data.parent_id:
+        await db.comments.update_one(
+            {"id": comment_data.parent_id},
+            {"$inc": {"replies_count": 1}}
+        )
+    
+    # Create notification for post author
+    if post_doc["author_id"] != current_user.id:
+        await create_notification(
+            user_id=post_doc["author_id"],
+            type="comment",
+            from_user_id=current_user.id,
+            message=f"{current_user.name} commented on your post",
+            post_id=post_id,
+            comment_id=comment.id
+        )
+    
+    return comment
+
+@api_router.delete("/comments/{comment_id}")
+async def delete_comment(comment_id: str, current_user: User = Depends(get_current_user)):
+    comment_doc = await db.comments.find_one({"id": comment_id})
+    if not comment_doc:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    
+    if comment_doc["author_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this comment")
+    
+    # Delete comment and its replies
+    await db.comments.delete_many({"$or": [{"id": comment_id}, {"parent_id": comment_id}]})
+    
+    # Update post comments count
+    replies_count = await db.comments.count_documents({"parent_id": comment_id})
+    total_deleted = 1 + replies_count
+    
+    await db.posts.update_one(
+        {"id": comment_doc["post_id"]},
+        {"$inc": {"comments_count": -total_deleted}}
+    )
+    
+    # Update parent comment replies count if it was a reply
+    if comment_doc.get("parent_id"):
+        await db.comments.update_one(
+            {"id": comment_doc["parent_id"]},
+            {"$inc": {"replies_count": -1}}
+        )
+    
+    return {"message": "Comment deleted successfully"}
+
+# Like Routes
+@api_router.post("/posts/{target_id}/like")
+async def toggle_like(target_id: str, target_type: str = "post", current_user: User = Depends(get_current_user)):
+    # Check if target exists
+    if target_type == "post":
+        target_doc = await db.posts.find_one({"id": target_id})
+        collection = db.posts
+    else:
+        target_doc = await db.comments.find_one({"id": target_id})
+        collection = db.comments
+    
+    if not target_doc:
+        raise HTTPException(status_code=404, detail=f"{target_type.capitalize()} not found")
+    
+    # Check if already liked
+    existing_like = await db.likes.find_one({
+        "user_id": current_user.id,
+        "target_id": target_id,
+        "target_type": target_type
+    })
+    
+    if existing_like:
+        # Unlike
+        await db.likes.delete_one({"id": existing_like["id"]})
+        await collection.update_one(
+            {"id": target_id},
+            {"$inc": {"likes_count": -1}}
+        )
+        return {"liked": False}
+    else:
+        # Like
+        like = Like(user_id=current_user.id, target_id=target_id, target_type=target_type)
+        like_doc = prepare_for_mongo(like.dict())
+        await db.likes.insert_one(like_doc)
+        await collection.update_one(
+            {"id": target_id},
+            {"$inc": {"likes_count": 1}}
+        )
+        
+        # Create notification
+        if target_doc["author_id"] != current_user.id:
+            message = f"{current_user.name} liked your {target_type}"
+            post_id = target_id if target_type == "post" else target_doc.get("post_id")
+            comment_id = target_id if target_type == "comment" else None
+            
+            await create_notification(
+                user_id=target_doc["author_id"],
+                type="like",
+                from_user_id=current_user.id,
+                message=message,
+                post_id=post_id,
+                comment_id=comment_id
+            )
+        
+        return {"liked": True}
+
+# Save Routes
+@api_router.post("/posts/{post_id}/save")
+async def toggle_save(post_id: str, current_user: User = Depends(get_current_user)):
+    # Check if post exists
+    post_doc = await db.posts.find_one({"id": post_id})
+    if not post_doc:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    # Check if already saved
+    existing_save = await db.saves.find_one({
+        "user_id": current_user.id,
+        "post_id": post_id
+    })
+    
+    if existing_save:
+        # Unsave
+        await db.saves.delete_one({"id": existing_save["id"]})
+        await db.posts.update_one(
+            {"id": post_id},
+            {"$inc": {"saves_count": -1}}
+        )
+        return {"saved": False}
+    else:
+        # Save
+        save = Save(user_id=current_user.id, post_id=post_id)
+        save_doc = prepare_for_mongo(save.dict())
+        await db.saves.insert_one(save_doc)
+        await db.posts.update_one(
+            {"id": post_id},
+            {"$inc": {"saves_count": 1}}
+        )
+        return {"saved": True}
+
+# Follow Routes
+@api_router.post("/users/{username}/follow")
+async def toggle_follow(username: str, current_user: User = Depends(get_current_user)):
+    # Get target user
+    target_user_doc = await db.users.find_one({"username": username})
+    if not target_user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    target_user_id = target_user_doc["id"]
+    
+    if target_user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot follow yourself")
+    
+    # Check if already following
+    existing_follow = await db.follows.find_one({
+        "follower_id": current_user.id,
+        "following_id": target_user_id
+    })
+    
+    if existing_follow:
+        # Unfollow
+        await db.follows.delete_one({"id": existing_follow["id"]})
+        
+        # Update counts
+        await db.users.update_one(
+            {"id": current_user.id},
+            {"$inc": {"following_count": -1}}
+        )
+        await db.users.update_one(
+            {"id": target_user_id},
+            {"$inc": {"followers_count": -1}}
+        )
+        return {"following": False}
+    else:
+        # Follow
+        follow = Follow(follower_id=current_user.id, following_id=target_user_id)
+        follow_doc = prepare_for_mongo(follow.dict())
+        await db.follows.insert_one(follow_doc)
+        
+        # Update counts
+        await db.users.update_one(
+            {"id": current_user.id},
+            {"$inc": {"following_count": 1}}
+        )
+        await db.users.update_one(
+            {"id": target_user_id},
+            {"$inc": {"followers_count": 1}}
+        )
+        
+        # Create notification
+        await create_notification(
+            user_id=target_user_id,
+            type="follow",
+            from_user_id=current_user.id,
+            message=f"{current_user.name} started following you"
+        )
+        
+        return {"following": True}
+
+# Message Routes
+@api_router.get("/conversations")
+async def get_conversations(current_user: User = Depends(get_current_user)):
+    conversations_cursor = db.conversations.find({
+        "participants": current_user.id
+    }).sort("last_message_at", -1)
+    
+    conversations = await conversations_cursor.to_list(None)
+    
+    enriched_conversations = []
+    for conv_doc in conversations:
+        conv_doc = parse_from_mongo(conv_doc)
+        
+        # Get other participant info
+        other_participant_id = None
+        for participant_id in conv_doc["participants"]:
+            if participant_id != current_user.id:
+                other_participant_id = participant_id
+                break
+        
+        if other_participant_id:
+            participant_doc = await db.users.find_one({"id": other_participant_id})
+            if participant_doc:
+                participant_doc = parse_from_mongo(participant_doc)
+                participant = User(**{k: v for k, v in participant_doc.items() if k != 'password'})
+                
+                conversation = Conversation(**conv_doc)
+                unread_count = conversation.unread_count.get(current_user.id, 0)
+                
+                enriched_conversations.append({
+                    "conversation": conversation.dict(),
+                    "participant": participant.dict(),
+                    "unread_count": unread_count,
+                    "is_online": user_status.get(other_participant_id, {}).get("status") == "online"
+                })
+    
+    return enriched_conversations
+
+@api_router.get("/conversations/{conversation_id}/messages")
+async def get_messages(conversation_id: str, current_user: User = Depends(get_current_user), limit: int = 50, skip: int = 0):
+    # Verify user is part of conversation
+    conv_doc = await db.conversations.find_one({"id": conversation_id})
+    if not conv_doc or current_user.id not in conv_doc["participants"]:
+        raise HTTPException(status_code=403, detail="Not authorized to access this conversation")
+    
+    messages_cursor = db.messages.find({
+        "conversation_id": conversation_id
+    }).sort("created_at", -1).skip(skip).limit(limit)
+    
+    messages = await messages_cursor.to_list(None)
+    
+    # Parse and reverse to show oldest first
+    parsed_messages = []
+    for msg_doc in messages:
+        msg_doc = parse_from_mongo(msg_doc)
+        parsed_messages.append(Message(**msg_doc))
+    
+    parsed_messages.reverse()
+    return [msg.dict() for msg in parsed_messages]
+
+@api_router.post("/conversations")
+async def create_conversation(message_data: MessageCreate, current_user: User = Depends(get_current_user)):
+    receiver_id = message_data.receiver_id
+    
+    # Check if receiver exists
+    receiver_doc = await db.users.find_one({"id": receiver_id})
+    if not receiver_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if conversation already exists
+    existing_conv = await db.conversations.find_one({
+        "participants": {"$all": [current_user.id, receiver_id]}
+    })
+    
+    conversation_id = None
+    if existing_conv:
+        conversation_id = existing_conv["id"]
+    else:
+        # Create new conversation
+        conversation = Conversation(
+            participants=[current_user.id, receiver_id],
+            unread_count={current_user.id: 0, receiver_id: 0}
+        )
+        conv_doc = prepare_for_mongo(conversation.dict())
+        await db.conversations.insert_one(conv_doc)
+        conversation_id = conversation.id
+    
+    # Create message
+    message = Message(
+        conversation_id=conversation_id,
+        sender_id=current_user.id,
+        receiver_id=receiver_id,
+        content=message_data.content,
+        message_type=message_data.message_type
+    )
+    
+    message_doc = prepare_for_mongo(message.dict())
+    await db.messages.insert_one(message_doc)
+    
+    # Update conversation
+    await db.conversations.update_one(
+        {"id": conversation_id},
+        {
+            "$set": {
+                "last_message": message_data.content,
+                "last_message_at": message.created_at.isoformat()
+            },
+            "$inc": {f"unread_count.{receiver_id}": 1}
+        }
+    )
+    
+    # Join conversation room for real-time updates
+    # This would be handled by WebSocket connection
+    
+    # Create notification
+    await create_notification(
+        user_id=receiver_id,
+        type="message",
+        from_user_id=current_user.id,
+        message=f"{current_user.name} sent you a message"
+    )
+    
+    # Emit real-time message
+    await sio.emit('message_received', {
+        'conversation_id': conversation_id,
+        'message': message.dict(),
+        'sender': current_user.dict()
+    }, room=f"user_{receiver_id}")
+    
+    return {
+        "conversation_id": conversation_id,
+        "message": message.dict()
+    }
+
+# Notification Routes
+@api_router.get("/notifications")
+async def get_notifications(current_user: User = Depends(get_current_user), limit: int = 20, skip: int = 0):
+    notifications_cursor = db.notifications.find({
+        "user_id": current_user.id
+    }).sort("created_at", -1).skip(skip).limit(limit)
+    
+    notifications = await notifications_cursor.to_list(None)
+    
+    enriched_notifications = []
+    for notif_doc in notifications:
+        notif_doc = parse_from_mongo(notif_doc)
+        notification = Notification(**notif_doc)
+        
+        # Get sender info
+        sender_doc = await db.users.find_one({"id": notification.from_user_id})
+        if sender_doc:
+            sender_doc = parse_from_mongo(sender_doc)
+            sender = User(**{k: v for k, v in sender_doc.items() if k != 'password'})
+            
+            enriched_notifications.append({
+                "notification": notification.dict(),
+                "sender": sender.dict()
+            })
+    
+    return enriched_notifications
+
+@api_router.get("/notifications/unread-count")
+async def get_unread_notifications_count(current_user: User = Depends(get_current_user)):
+    count = await db.notifications.count_documents({
+        "user_id": current_user.id,
+        "is_read": False
+    })
+    return {"count": count}
+
+@api_router.post("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, current_user: User = Depends(get_current_user)):
+    await db.notifications.update_one(
+        {"id": notification_id, "user_id": current_user.id},
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "Notification marked as read"}
+
+@api_router.post("/notifications/mark-all-read")
+async def mark_all_notifications_read(current_user: User = Depends(get_current_user)):
+    await db.notifications.update_many(
+        {"user_id": current_user.id, "is_read": False},
+        {"$set": {"is_read": True}}
+    )
+    return {"message": "All notifications marked as read"}
+
+# Search Routes
+@api_router.get("/search")
+async def search(q: str, type: str = "all", current_user: User = Depends(get_current_user), limit: int = 10):
+    if not q or len(q.strip()) < 2:
+        return {"users": [], "posts": []}
+    
+    results = {"users": [], "posts": []}
+    
+    if type in ["all", "users"]:
+        # Search users
+        users_cursor = db.users.find({
+            "$or": [
+                {"username": {"$regex": q, "$options": "i"}},
+                {"name": {"$regex": q, "$options": "i"}}
+            ]
+        }).limit(limit)
+        
+        users = await users_cursor.to_list(None)
+        results["users"] = [
+            User(**{k: v for k, v in parse_from_mongo(user_doc).items() if k != 'password'}).dict()
+            for user_doc in users
+        ]
+    
+    if type in ["all", "posts"]:
+        # Search posts
+        posts_cursor = db.posts.find({
+            "$or": [
+                {"content": {"$regex": q, "$options": "i"}},
+                {"hashtags": {"$in": [q.lower()]}}
+            ],
+            "visibility": "public"
+        }).sort("created_at", -1).limit(limit)
+        
+        posts = await posts_cursor.to_list(None)
+        
+        enriched_posts = []
+        for post_doc in posts:
+            post_doc = parse_from_mongo(post_doc)
+            
+            # Get author info
+            author_doc = await db.users.find_one({"id": post_doc["author_id"]})
+            if author_doc:
+                author_doc = parse_from_mongo(author_doc)
+                author = User(**{k: v for k, v in author_doc.items() if k != 'password'})
+                
+                post = Post(**post_doc)
+                enriched_posts.append({
+                    "post": post.dict(),
+                    "author": author.dict()
+                })
+        
+        results["posts"] = enriched_posts
+    
+    return results
+
+# Block and Report Routes
+@api_router.post("/users/{user_id}/block")
+async def block_user(user_id: str, current_user: User = Depends(get_current_user)):
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot block yourself")
+    
+    # Check if user exists
+    user_doc = await db.users.find_one({"id": user_id})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if already blocked
+    existing_block = await db.blocks.find_one({
+        "blocker_id": current_user.id,
+        "blocked_id": user_id
+    })
+    
+    if existing_block:
+        return {"blocked": True}
+    
+    # Create block
+    block = Block(blocker_id=current_user.id, blocked_id=user_id)
+    block_doc = prepare_for_mongo(block.dict())
+    await db.blocks.insert_one(block_doc)
+    
+    # Remove follow relationships
+    await db.follows.delete_many({
+        "$or": [
+            {"follower_id": current_user.id, "following_id": user_id},
+            {"follower_id": user_id, "following_id": current_user.id}
+        ]
+    })
+    
+    # Update follower counts
+    await db.users.update_one(
+        {"id": current_user.id},
+        {"$inc": {"following_count": -1}}
+    )
+    await db.users.update_one(
+        {"id": user_id},
+        {"$inc": {"followers_count": -1}}
+    )
+    
+    return {"blocked": True}
+
+@api_router.post("/report")
+async def create_report(
+    target_id: str,
+    target_type: str,
+    reason: str,
+    description: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    report = Report(
+        reporter_id=current_user.id,
+        target_id=target_id,
+        target_type=target_type,
+        reason=reason,
+        description=description
+    )
+    
+    report_doc = prepare_for_mongo(report.dict())
+    await db.reports.insert_one(report_doc)
+    
+    return {"message": "Report submitted successfully"}
+
+# Include the router in the main app
+app.include_router(api_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()
