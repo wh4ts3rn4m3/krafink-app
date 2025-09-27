@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
@@ -10,8 +10,8 @@ import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { 
-  Edit, MessageSquare, Users, MapPin, Link as LinkIcon, 
-  Calendar, Loader2, Camera, X, Save, User
+  Edit, MessageSquare, Users, Link as LinkIcon, 
+  Loader2, X, Save, Upload
 } from 'lucide-react';
 import { useAuth } from '../App';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -20,9 +20,13 @@ import { toast } from 'sonner';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+const resolveUrl = (url) => {
+  if (!url) return '';
+  return url.startsWith('http') ? url : `${BACKEND_URL}${url}`;
+};
+
 // Post component for profile posts
 const ProfilePostCard = ({ post, author, userLiked, userSaved, onUpdate }) => {
-  const { user } = useAuth();
   const navigate = useNavigate();
   
   const handleLike = async () => {
@@ -37,7 +41,7 @@ const ProfilePostCard = ({ post, author, userLiked, userSaved, onUpdate }) => {
         });
       }
     } catch (error) {
-      toast.error("Failed to like post");
+      toast.error('Failed to like post');
     }
   };
 
@@ -53,7 +57,7 @@ const ProfilePostCard = ({ post, author, userLiked, userSaved, onUpdate }) => {
         <div className="flex items-start space-x-4">
           <Link to={`/@${author?.username}`}>
             <Avatar className="h-10 w-10">
-              <AvatarImage src={author?.avatar} />
+              <AvatarImage src={resolveUrl(author?.avatar)} />
               <AvatarFallback>{author?.name?.[0]?.toUpperCase()}</AvatarFallback>
             </Avatar>
           </Link>
@@ -113,45 +117,106 @@ const ProfilePostCard = ({ post, author, userLiked, userSaved, onUpdate }) => {
   );
 };
 
+const LinksEditor = ({ value, onChange }) => {
+  const addLink = () => onChange([...(value || []), { label: '', url: '' }]);
+  const removeLink = (idx) => onChange((value || []).filter((_, i) => i !== idx));
+  const updateLink = (idx, field, v) => onChange((value || []).map((item, i) => i === idx ? { ...item, [field]: v } : item));
+
+  return (
+    <div className="space-y-2">
+      {(value || []).map((item, idx) => (
+        <div key={idx} className="flex space-x-2">
+          <Input
+            placeholder="Label"
+            value={item.label}
+            onChange={(e) => updateLink(idx, 'label', e.target.value)}
+          />
+          <Input
+            placeholder="https://example.com"
+            value={item.url}
+            onChange={(e) => updateLink(idx, 'url', e.target.value)}
+          />
+          <Button type="button" variant="ghost" onClick={() => removeLink(idx)}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <Button type="button" variant="outline" onClick={addLink}>
+        + Add Link
+      </Button>
+    </div>
+  );
+};
+
 const EditProfileModal = ({ isOpen, onClose, user, onUpdate }) => {
+  const fileInputAvatar = useRef(null);
+  const fileInputBanner = useRef(null);
   const [formData, setFormData] = useState({
     name: user?.name || '',
     bio: user?.bio || '',
-    links: user?.links?.join('\n') || ''
+    avatar: user?.avatar || '',
+    banner: user?.banner || '',
+    links: []
   });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (user) {
+      let links = [];
+      if (Array.isArray(user.links)) {
+        links = user.links.map((l, idx) => {
+          if (typeof l === 'string') return { label: `Link ${idx + 1}`, url: l };
+          return l;
+        });
+      }
       setFormData({
         name: user.name || '',
         bio: user.bio || '',
-        links: user.links?.join('\n') || ''
+        avatar: user.avatar || '',
+        banner: user.banner || '',
+        links
       });
     }
   }, [user]);
 
+  const handleUpload = async (file, field) => {
+    if (!file) return;
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await axios.post(`${API}/upload/image`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setFormData(prev => ({ ...prev, [field]: res.data.url }));
+      toast.success(`${field === 'avatar' ? 'Avatar' : 'Banner'} updated`);
+    } catch (e) {
+      toast.error('Upload failed');
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
-    
     try {
-      const links = formData.links
-        .split('\n')
-        .map(link => link.trim())
-        .filter(link => link.length > 0);
+      // sanitize links
+      const links = (formData.links || [])
+        .filter(l => (l.url || '').trim())
+        .map(l => ({ label: l.label?.trim() || l.url, url: l.url.trim() }));
 
-      const response = await axios.put(`${API}/users/profile`, {
+      const payload = {
         name: formData.name,
         bio: formData.bio,
-        links
-      });
+        links,
+        avatar: formData.avatar || null,
+        banner: formData.banner || null
+      };
 
+      const response = await axios.put(`${API}/users/profile`, payload);
       onUpdate(response.data);
-      toast.success("Profile updated successfully!");
+      toast.success('Profile updated successfully!');
       onClose();
     } catch (error) {
-      toast.error("Failed to update profile");
+      toast.error('Failed to update profile');
     } finally {
       setSaving(false);
     }
@@ -165,6 +230,33 @@ const EditProfileModal = ({ isOpen, onClose, user, onUpdate }) => {
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Avatar & Banner */}
+          <div className="space-y-3">
+            <div className="flex items-center space-x-3">
+              <Avatar className="h-16 w-16">
+                <AvatarImage src={resolveUrl(formData.avatar)} />
+                <AvatarFallback>{formData.name?.[0]?.toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <div>
+                <input ref={fileInputAvatar} type="file" accept="image/*" className="hidden" onChange={(e) => handleUpload(e.target.files[0], 'avatar')} />
+                <Button type="button" variant="outline" onClick={() => fileInputAvatar.current?.click()}>
+                  Change Avatar
+                </Button>
+              </div>
+            </div>
+            <div>
+              {formData.banner && (
+                <img src={resolveUrl(formData.banner)} alt="Banner" className="w-full h-24 object-cover rounded" />
+              )}
+              <div className="mt-2">
+                <input ref={fileInputBanner} type="file" accept="image/*" className="hidden" onChange={(e) => handleUpload(e.target.files[0], 'banner')} />
+                <Button type="button" variant="outline" onClick={() => fileInputBanner.current?.click()}>
+                  Change Banner
+                </Button>
+              </div>
+            </div>
+          </div>
+
           <div>
             <label className="text-sm font-medium mb-2 block">Display Name</label>
             <Input
@@ -187,16 +279,10 @@ const EditProfileModal = ({ isOpen, onClose, user, onUpdate }) => {
               data-testid="edit-bio-input"
             />
           </div>
-          
+
           <div>
             <label className="text-sm font-medium mb-2 block">Links</label>
-            <Textarea
-              value={formData.links}
-              onChange={(e) => setFormData({ ...formData, links: e.target.value })}
-              placeholder="Add your website, portfolio, or social media links (one per line)"
-              rows={3}
-              data-testid="edit-links-input"
-            />
+            <LinksEditor value={formData.links} onChange={(links) => setFormData(prev => ({ ...prev, links }))} />
           </div>
           
           <div className="flex justify-end space-x-2">
@@ -267,7 +353,7 @@ const FollowersModal = ({ isOpen, onClose, userId, title, isFollowing = false })
                   className="flex items-center space-x-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg transition-colors"
                 >
                   <Avatar className="h-10 w-10">
-                    <AvatarImage src={user.avatar} />
+                    <AvatarImage src={resolveUrl(user.avatar)} />
                     <AvatarFallback>{user.name[0]?.toUpperCase()}</AvatarFallback>
                   </Avatar>
                   <div>
@@ -319,12 +405,12 @@ const ProfilePage = () => {
       const response = await axios.get(`${API}/users/${username}`);
       setProfileUser(response.data);
       
-      // Check if current user is following this profile
+      // Check follow status
       if (currentUser && response.data.id !== currentUser.id) {
         checkFollowStatus(response.data.id);
       }
     } catch (error) {
-      toast.error("User not found");
+      toast.error('User not found');
       navigate('/feed');
     } finally {
       setLoading(false);
@@ -333,7 +419,6 @@ const ProfilePage = () => {
 
   const checkFollowStatus = async (userId) => {
     try {
-      // For now, we'll check by looking at follow relationships
       const response = await axios.get(`${API}/users/${userId}/followers`);
       const isUserFollowing = response.data.some(follower => follower.id === currentUser.id);
       setIsFollowing(isUserFollowing);
@@ -345,7 +430,7 @@ const ProfilePage = () => {
   const fetchUserPosts = async () => {
     setPostsLoading(true);
     try {
-      const response = await axios.get(`${API}/posts/feed?limit=50&user=${username}`);
+      const response = await axios.get(`${API}/users/${username}/posts?limit=50`);
       setPosts(response.data || []);
     } catch (error) {
       console.error('Failed to fetch user posts:', error);
@@ -371,7 +456,7 @@ const ProfilePage = () => {
       
       toast.success(newFollowState ? `Following ${profileUser.name}` : `Unfollowed ${profileUser.name}`);
     } catch (error) {
-      toast.error("Failed to follow user");
+      toast.error('Failed to follow user');
     } finally {
       setFollowLoading(false);
     }
@@ -414,9 +499,7 @@ const ProfilePage = () => {
       <div className="max-w-4xl mx-auto py-6 px-4">
         <Card>
           <CardContent className="text-center py-12">
-            <User className="h-16 w-16 mx-auto text-gray-400 mb-4" />
-            <h2 className="text-xl font-semibold mb-2">User not found</h2>
-            <p className="text-gray-500 mb-4">The user @{username} doesn't exist or has been deleted.</p>
+            <p className="text-gray-500">User not found</p>
             <Button onClick={() => navigate('/feed')}>
               Return to Feed
             </Button>
@@ -437,7 +520,7 @@ const ProfilePage = () => {
           <div className="h-32 bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 rounded-t-lg relative">
             {profileUser.banner && (
               <img 
-                src={`${BACKEND_URL}${profileUser.banner}`} 
+                src={resolveUrl(profileUser.banner)} 
                 alt="Profile banner"
                 className="w-full h-full object-cover rounded-t-lg"
               />
@@ -448,7 +531,7 @@ const ProfilePage = () => {
           <div className="px-6 pb-6">
             <div className="flex items-end justify-between -mt-10 mb-4">
               <Avatar className="h-20 w-20 border-4 border-white dark:border-gray-800">
-                <AvatarImage src={profileUser.avatar} />
+                <AvatarImage src={resolveUrl(profileUser.avatar)} />
                 <AvatarFallback className="text-2xl">{profileUser.name[0]?.toUpperCase()}</AvatarFallback>
               </Avatar>
               
@@ -457,8 +540,8 @@ const ProfilePage = () => {
                   <>
                     <Button 
                       onClick={handleFollow}
-                      variant={isFollowing ? "outline" : "default"}
-                      className={isFollowing ? "" : "bg-gradient-to-r from-purple-600 to-pink-500"}
+                      variant={isFollowing ? 'outline' : 'default'}
+                      className={isFollowing ? '' : 'bg-gradient-to-r from-purple-600 to-pink-500'}
                       disabled={followLoading}
                       data-testid="follow-btn"
                     >
@@ -498,19 +581,23 @@ const ProfilePage = () => {
               )}
               
               {profileUser.links && profileUser.links.length > 0 && (
-                <div className="flex items-center space-x-4 mt-2">
-                  {profileUser.links.map((link, index) => (
-                    <a 
-                      key={index}
-                      href={link.startsWith('http') ? link : `https://${link}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:underline text-sm flex items-center"
-                    >
-                      <LinkIcon className="h-3 w-3 mr-1" />
-                      {link.replace(/^https?:\/\//, '')}
-                    </a>
-                  ))}
+                <div className="flex flex-wrap items-center gap-4 mt-2">
+                  {profileUser.links.map((lnk, index) => {
+                    const label = typeof lnk === 'string' ? lnk.replace(/^https?:\/\//, '') : lnk.label || lnk.url;
+                    const url = typeof lnk === 'string' ? lnk : lnk.url;
+                    return (
+                      <a 
+                        key={index}
+                        href={url.startsWith('http') ? url : `https://${url}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-500 hover:underline text-sm flex items-center"
+                      >
+                        <LinkIcon className="h-3 w-3 mr-1" />
+                        {label}
+                      </a>
+                    );
+                  })}
                 </div>
               )}
               
@@ -615,18 +702,22 @@ const ProfilePage = () => {
                 <div className="mt-6">
                   <h4 className="font-medium mb-3">{t('profile.links')}</h4>
                   <div className="space-y-2">
-                    {profileUser.links.map((link, index) => (
-                      <a 
-                        key={index}
-                        href={link.startsWith('http') ? link : `https://${link}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center text-blue-500 hover:underline"
-                      >
-                        <LinkIcon className="h-4 w-4 mr-2" />
-                        {link}
-                      </a>
-                    ))}
+                    {profileUser.links.map((lnk, index) => {
+                      const label = typeof lnk === 'string' ? lnk : (lnk.label || lnk.url);
+                      const url = typeof lnk === 'string' ? lnk : lnk.url;
+                      return (
+                        <a 
+                          key={index}
+                          href={url.startsWith('http') ? url : `https://${url}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center text-blue-500 hover:underline"
+                        >
+                          <LinkIcon className="h-4 w-4 mr-2" />
+                          {label}
+                        </a>
+                      );
+                    })}
                   </div>
                 </div>
               )}

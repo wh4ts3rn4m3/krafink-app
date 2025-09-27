@@ -72,6 +72,10 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class LinkItem(BaseModel):
+    label: str
+    url: str
+
 class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     email: str
@@ -86,10 +90,6 @@ class User(BaseModel):
     is_private: bool = False
     is_blocked: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class LinkItem(BaseModel):
-    label: str
-    url: str
 
 class UserProfile(BaseModel):
     name: Optional[str] = None
@@ -549,6 +549,53 @@ async def get_following(user_id: str, current_user: User = Depends(get_current_u
             following.append(User(**{k: v for k, v in user_doc.items() if k != 'password'}))
     
     return following
+
+@api_router.get("/users/{username}/posts", response_model=List[dict])
+async def get_user_posts(username: str, current_user: User = Depends(get_current_user), limit: int = 20, skip: int = 0):
+    target_user_doc = await db.users.find_one({"username": username})
+    if not target_user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    target_user_id = target_user_doc["id"]
+
+    posts_cursor = db.posts.find({
+        "author_id": target_user_id,
+        "visibility": {"$in": ["public", "followers"]}
+    }).sort("created_at", -1).skip(skip).limit(limit)
+
+    posts = await posts_cursor.to_list(None)
+
+    enriched_posts = []
+    for post_doc in posts:
+        post_doc = parse_from_mongo(post_doc)
+
+        # author info
+        author_doc = await db.users.find_one({"id": post_doc["author_id"]})
+        author = None
+        if author_doc:
+            author_doc = parse_from_mongo(author_doc)
+            author = User(**{k: v for k, v in author_doc.items() if k != 'password'})
+
+        # interactions
+        user_liked = await db.likes.find_one({
+            "user_id": current_user.id,
+            "target_id": post_doc["id"],
+            "target_type": "post"
+        }) is not None
+
+        user_saved = await db.saves.find_one({
+            "user_id": current_user.id,
+            "post_id": post_doc["id"]
+        }) is not None
+
+        post = Post(**post_doc)
+        enriched_posts.append({
+            "post": post.dict(),
+            "author": author.dict() if author else None,
+            "user_liked": user_liked,
+            "user_saved": user_saved
+        })
+
+    return enriched_posts
 
 # Post Routes
 @api_router.post("/posts", response_model=Post)
