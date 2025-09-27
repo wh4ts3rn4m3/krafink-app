@@ -1707,7 +1707,7 @@ const AppContent = () => {
           <Route path="/feed" element={<HomeFeed />} />
           <Route path="/explore" element={<ExploreFeed />} />
           <Route path="/search" element={<SearchPage />} />
-          <Route path="/messages" element={<Messages />} />
+          <Route path="/messages" element={<MessagesPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/compose" element={<ComposePage />} />
           <Route path="/@:username" element={<UserProfileWrapper />} />
