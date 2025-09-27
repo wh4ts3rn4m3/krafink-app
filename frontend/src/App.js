@@ -96,6 +96,12 @@ const AuthProvider = ({ children }) => {
       toast.info(data.notification.message);
     });
   };
+    if (socket) {
+      socket.on('follow_updated', (data) => {
+        // noop here; components that need will listen globally through window or context later
+      });
+    }
+
 
   const fetchCurrentUser = async () => {
     try {
