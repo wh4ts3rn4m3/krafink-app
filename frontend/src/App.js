@@ -258,7 +258,14 @@ const PostCard = ({ item, onUpdate }) => {
             {post.images && post.images.length > 0 && (
               <div className={`grid gap-2 mb-4 rounded-lg overflow-hidden ${post.images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 {post.images.map((img, i) => (
-                  <img key={i} src={`${BACKEND_URL}${img}`} alt={`Post image ${i + 1}`} className="w-full h-48 object-cover" />
+                  <img 
+                    key={i} 
+                    src={`${BACKEND_URL}${img}`} 
+                    alt={`Post image ${i + 1}`} 
+                    className="w-full h-48 object-cover"
+                    loading="lazy"
+                    onError={(e) => { e.currentTarget.src = 'data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'400\' height=\'300\'><rect width=\'100%\' height=\'100%\' fill=\'#eee\'/><text x=\'50%\' y=\'50%\' font-size=\'16\' fill=\'#999\' text-anchor=\'middle\' dominant-baseline=\'middle\'>Image unavailable</text></svg>'; }}
+                  />
                 ))}
               </div>
             )}
