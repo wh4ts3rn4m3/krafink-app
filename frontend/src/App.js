@@ -1,8 +1,14 @@
 import React, { useState, useEffect, createContext, useContext } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useParams, Link } from "react-router-dom";
 import axios from "axios";
 import io from "socket.io-client";
 import "./App.css";
+
+// Context Providers
+import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
+import { LanguageProvider, useLanguage } from "./contexts/LanguageContext";
+
+// UI Components
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
@@ -11,14 +17,27 @@ import { Avatar, AvatarFallback, AvatarImage } from "./components/ui/avatar";
 import { Badge } from "./components/ui/badge";
 import { Separator } from "./components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./components/ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "./components/ui/sheet";
+
+// Icons
 import { 
   Heart, MessageCircle, Search, User, Home, Settings, LogOut, Plus, Send, 
   Bell, Bookmark, Share, MoreHorizontal, Edit, Trash, Flag, UserX,
   Image as ImageIcon, Smile, Hash, AtSign, X, Users, Eye, EyeOff,
-  MessageSquare, Compass, Menu, Upload, Camera, Loader2
+  MessageSquare, Compass, Menu, Upload, Camera, Loader2, Moon, Sun,
+  Languages, Globe
 } from "lucide-react";
+
+// Toast notifications
 import { toast } from "sonner";
+
+// Pages
+import SearchPage from "./pages/SearchPage";
+import MessagesPage from "./pages/MessagesPage";
+import ComposePage from "./pages/ComposePage";
+import AdminPage from "./pages/AdminPage";
+import { TermsPage, PrivacyPage, ImprintPage, CookieBanner } from "./pages/LegalPages";
+
+// Hooks
 import { useInView } from "react-intersection-observer";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -30,7 +49,7 @@ let socket = null;
 // Auth Context
 const AuthContext = createContext();
 
-const useAuth = () => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
     throw new Error("useAuth must be used within AuthProvider");
@@ -54,33 +73,28 @@ const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (user && token && !socket) {
-      // Initialize socket connection
-      socket = io(BACKEND_URL);
-      
-      socket.on('connect', () => {
-        console.log('Connected to server');
-        // Join user room for notifications
-        socket.emit('join_user', { user_id: user.id });
-      });
-
-      socket.on('notification', (data) => {
-        toast.info(data.notification.message);
-        // Update notification count if needed
-      });
-
-      socket.on('message_received', (data) => {
-        // Handle real-time messages
-        console.log('Message received:', data);
-      });
-
-      return () => {
-        if (socket) {
-          socket.disconnect();
-          socket = null;
-        }
-      };
+      initSocket();
     }
+
+    return () => {
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+      }
+    };
   }, [user, token]);
+
+  const initSocket = () => {
+    socket = io(BACKEND_URL);
+    
+    socket.on('connect', () => {
+      socket.emit('join_user', { user_id: user.id });
+    });
+
+    socket.on('notification', (data) => {
+      toast.info(data.notification.message);
+    });
+  };
 
   const fetchCurrentUser = async () => {
     try {
@@ -154,6 +168,8 @@ const AuthProvider = ({ children }) => {
 // Notification Context
 const NotificationContext = createContext();
 
+export const useNotifications = () => useContext(NotificationContext);
+
 const NotificationProvider = ({ children }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const { user } = useAuth();
@@ -161,7 +177,6 @@ const NotificationProvider = ({ children }) => {
   useEffect(() => {
     if (user) {
       fetchUnreadCount();
-      // Set up real-time updates
       if (socket) {
         socket.on('notification', () => {
           setUnreadCount(prev => prev + 1);
@@ -186,8 +201,6 @@ const NotificationProvider = ({ children }) => {
   );
 };
 
-const useNotifications = () => useContext(NotificationContext);
-
 // Auth Components
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -199,6 +212,7 @@ const AuthPage = () => {
   });
   const [loading, setLoading] = useState(false);
   const { login, register } = useAuth();
+  const { t } = useLanguage();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -226,7 +240,7 @@ const AuthPage = () => {
             krafink
           </div>
           <CardTitle className="text-xl text-gray-700">
-            {isLogin ? "Welcome back" : "Join the community"}
+            {isLogin ? t('auth.welcome_back') : t('auth.join_community')}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -234,7 +248,7 @@ const AuthPage = () => {
             <Input
               type="email"
               name="email"
-              placeholder="Email"
+              placeholder={t('auth.email')}
               value={formData.email}
               onChange={handleInputChange}
               required
@@ -246,7 +260,7 @@ const AuthPage = () => {
                 <Input
                   type="text"
                   name="username"
-                  placeholder="Username"
+                  placeholder={t('auth.username')}
                   value={formData.username}
                   onChange={handleInputChange}
                   required
@@ -255,7 +269,7 @@ const AuthPage = () => {
                 <Input
                   type="text"
                   name="name"
-                  placeholder="Display Name"
+                  placeholder={t('auth.name')}
                   value={formData.name}
                   onChange={handleInputChange}
                   required
@@ -267,7 +281,7 @@ const AuthPage = () => {
             <Input
               type="password"
               name="password"
-              placeholder="Password"
+              placeholder={t('auth.password')}
               value={formData.password}
               onChange={handleInputChange}
               required
@@ -280,7 +294,7 @@ const AuthPage = () => {
               disabled={loading}
               data-testid="auth-submit-btn"
             >
-              {loading ? "Please wait..." : (isLogin ? "Sign In" : "Create Account")}
+              {loading ? "Please wait..." : (isLogin ? t('auth.sign_in') : t('auth.create_account'))}
             </Button>
           </form>
           
@@ -290,7 +304,7 @@ const AuthPage = () => {
               onClick={() => setIsLogin(!isLogin)}
               data-testid="auth-toggle-btn"
             >
-              {isLogin ? "Need an account? Sign up" : "Already have an account? Sign in"}
+              {isLogin ? t('auth.need_account') : t('auth.have_account')}
             </Button>
           </div>
         </CardContent>
@@ -300,242 +314,547 @@ const AuthPage = () => {
 };
 
 // Navigation Components
-const DesktopNavigation = () => {
+const Navigation = () => {
   const { user, logout } = useAuth();
   const { unreadCount } = useNotifications();
-  const [showCreatePost, setShowCreatePost] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
-
-  return (
-    <nav className="bg-white/90 backdrop-blur-md border-b border-purple-100 sticky top-0 z-50">
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
-          <div className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
-            krafink
-          </div>
-          
-          <SearchBar />
-          
-          <div className="flex items-center space-x-4">
-            <NavButton to="/feed" icon={Home} label="Home" />
-            <NavButton to="/explore" icon={Compass} label="Explore" />
-            
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              onClick={() => setShowCreatePost(true)}
-              data-testid="create-post-nav-btn"
-            >
-              <Plus className="h-5 w-5" />
-            </Button>
-            
-            <div className="relative">
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => setShowNotifications(!showNotifications)}
-                data-testid="notifications-btn"
-              >
-                <Bell className="h-5 w-5" />
-                {unreadCount > 0 && (
-                  <Badge className="absolute -top-1 -right-1 h-5 w-5 p-0 text-xs bg-red-500">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </Badge>
-                )}
-              </Button>
-            </div>
-            
-            <NavButton to="/messages" icon={MessageSquare} label="Messages" />
-            <NavButton to={`/@${user?.username}`} icon={User} label="Profile" />
-            
-            <Button variant="ghost" size="sm" onClick={logout} data-testid="logout-btn">
-              <LogOut className="h-5 w-5" />
-            </Button>
-            
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={user?.avatar} />
-              <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
-            </Avatar>
-          </div>
-        </div>
-      </div>
-
-      <CreatePostModal isOpen={showCreatePost} onClose={() => setShowCreatePost(false)} />
-      {showNotifications && (
-        <NotificationsDropdown onClose={() => setShowNotifications(false)} />
-      )}
-    </nav>
-  );
-};
-
-const MobileNavigation = () => {
-  const { user } = useAuth();
-  const { unreadCount } = useNotifications();
+  const { theme, toggleTheme } = useTheme();
+  const { language, switchLanguage, t } = useLanguage();
   const location = useLocation();
-  const [showCreatePost, setShowCreatePost] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const navItems = [
-    { to: "/feed", icon: Home, label: "Home" },
-    { to: "/explore", icon: Compass, label: "Explore" },
-    { action: () => setShowCreatePost(true), icon: Plus, label: "Create" },
-    { to: "/messages", icon: MessageSquare, label: "Messages" },
-    { to: `/@${user?.username}`, icon: User, label: "Profile" }
+    { path: '/feed', icon: Home, label: t('nav.home'), testId: 'nav-home' },
+    { path: '/explore', icon: Compass, label: t('nav.explore'), testId: 'nav-explore' },
+    { path: '/search', icon: Search, label: t('nav.search'), testId: 'nav-search' },
+    { path: '/messages', icon: MessageSquare, label: t('nav.messages'), testId: 'nav-messages' },
+    { 
+      path: '/notifications', 
+      icon: Bell, 
+      label: t('nav.notifications'),
+      badge: unreadCount,
+      testId: 'nav-notifications'
+    },
+    { path: '/compose', icon: Plus, label: t('nav.create'), testId: 'nav-create' },
   ];
+
+  const NavButton = ({ item, isMobile = false }) => {
+    const isActive = location.pathname === item.path;
+    
+    return (
+      <Link
+        to={item.path}
+        className={`flex items-center space-x-2 p-2 rounded-lg transition-colors relative ${
+          isActive 
+            ? 'bg-purple-100 text-purple-600 dark:bg-purple-900 dark:text-purple-300' 
+            : 'hover:bg-gray-100 dark:hover:bg-gray-800'
+        } ${isMobile ? 'flex-col space-x-0 space-y-1' : ''}`}
+        data-testid={item.testId}
+      >
+        <item.icon className="h-5 w-5" />
+        <span className={isMobile ? 'text-xs' : ''}>{item.label}</span>
+        {item.badge > 0 && (
+          <Badge className="absolute -top-1 -right-1 h-5 w-5 p-0 text-xs bg-red-500">
+            {item.badge > 9 ? '9+' : item.badge}
+          </Badge>
+        )}
+      </Link>
+    );
+  };
 
   return (
     <>
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-purple-100 z-50">
-        <div className="flex items-center justify-around py-2">
-          {navItems.map((item, index) => (
-            <Button
-              key={index}
-              variant="ghost"
-              size="sm"
-              className={`flex flex-col items-center space-y-1 ${
-                item.to === location.pathname ? 'text-purple-600' : 'text-gray-600'
-              }`}
-              onClick={item.action || (() => window.location.href = item.to)}
-            >
-              <item.icon className="h-5 w-5" />
-              <span className="text-xs">{item.label}</span>
-              {item.label === "Messages" && unreadCount > 0 && (
-                <Badge className="absolute top-0 right-0 h-4 w-4 p-0 text-xs bg-red-500">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </Badge>
-              )}
-            </Button>
-          ))}
+      {/* Desktop Navigation */}
+      <nav className="hidden md:block bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-purple-100 dark:border-gray-700 sticky top-0 z-50">
+        <div className="max-w-6xl mx-auto px-4">
+          <div className="flex items-center justify-between h-16">
+            <Link to="/feed" className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
+              krafink
+            </Link>
+            
+            <div className="flex items-center space-x-6">
+              {navItems.map((item) => (
+                <NavButton key={item.path} item={item} />
+              ))}
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              {/* Theme Toggle */}
+              <Button variant="ghost" size="sm" onClick={toggleTheme} data-testid="theme-toggle">
+                {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+              </Button>
+              
+              {/* Language Toggle */}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => switchLanguage(language === 'en' ? 'de' : 'en')}
+                data-testid="language-toggle"
+              >
+                <Languages className="h-4 w-4 mr-1" />
+                {language.toUpperCase()}
+              </Button>
+              
+              {/* Profile Menu */}
+              <Link to={`/@${user?.username}`}>
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user?.avatar} />
+                  <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
+                </Avatar>
+              </Link>
+              
+              <Button variant="ghost" size="sm" onClick={logout} data-testid="logout-btn">
+                <LogOut className="h-5 w-5" />
+              </Button>
+            </div>
+          </div>
         </div>
       </nav>
-      
-      <CreatePostModal isOpen={showCreatePost} onClose={() => setShowCreatePost(false)} />
+
+      {/* Mobile Navigation */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-purple-100 dark:border-gray-700 z-50">
+        <div className="flex items-center justify-around py-2">
+          {navItems.slice(0, 5).map((item) => (
+            <NavButton key={item.path} item={item} isMobile={true} />
+          ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex flex-col items-center space-y-1"
+            onClick={() => setShowMobileMenu(true)}
+            data-testid="mobile-menu"
+          >
+            <Menu className="h-5 w-5" />
+            <span className="text-xs">Menu</span>
+          </Button>
+        </div>
+      </nav>
+
+      {/* Mobile Menu Dialog */}
+      <Dialog open={showMobileMenu} onOpenChange={setShowMobileMenu}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Menu</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Link 
+              to={`/@${user?.username}`} 
+              className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-100"
+              onClick={() => setShowMobileMenu(false)}
+            >
+              <Avatar className="h-10 w-10">
+                <AvatarImage src={user?.avatar} />
+                <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="font-medium">{user?.name}</p>
+                <p className="text-sm text-gray-500">@{user?.username}</p>
+              </div>
+            </Link>
+            
+            <Separator />
+            
+            <Button 
+              variant="ghost" 
+              className="w-full justify-start" 
+              onClick={toggleTheme}
+            >
+              {theme === 'light' ? <Moon className="h-4 w-4 mr-2" /> : <Sun className="h-4 w-4 mr-2" />}
+              {t('theme.toggle')}
+            </Button>
+            
+            <Button 
+              variant="ghost" 
+              className="w-full justify-start"
+              onClick={() => switchLanguage(language === 'en' ? 'de' : 'en')}
+            >
+              <Languages className="h-4 w-4 mr-2" />
+              {language === 'en' ? 'Deutsch' : 'English'}
+            </Button>
+            
+            <Separator />
+            
+            <Button 
+              variant="ghost" 
+              className="w-full justify-start text-red-600" 
+              onClick={() => {
+                logout();
+                setShowMobileMenu(false);
+              }}
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              {t('nav.logout')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
 
-const NavButton = ({ to, icon: Icon, label }) => {
-  const location = useLocation();
-  const isActive = location.pathname === to;
-  
+// Feed Components
+const CreatePostCard = ({ onPostCreated }) => {
+  const [showComposer, setShowComposer] = useState(false);
+  const { user } = useAuth();
+  const { t } = useLanguage();
+
   return (
-    <Button 
-      variant="ghost" 
-      size="sm" 
-      className={isActive ? 'text-purple-600' : ''}
-      onClick={() => window.location.href = to}
-    >
-      <Icon className="h-5 w-5" />
-      <span className="sr-only">{label}</span>
-    </Button>
+    <Card className="mb-6">
+      <CardContent className="pt-6">
+        <div className="flex space-x-4">
+          <Avatar className="h-10 w-10">
+            <AvatarImage src={user?.avatar} />
+            <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <Button
+            variant="outline"
+            className="flex-1 justify-start text-gray-500"
+            onClick={() => setShowComposer(true)}
+            data-testid="quick-compose-btn"
+          >
+            {t('post.whats_on_mind')}
+          </Button>
+        </div>
+        
+        <div className="flex items-center justify-between mt-4 pt-4 border-t">
+          <div className="flex items-center space-x-4">
+            <Button variant="ghost" size="sm">
+              <ImageIcon className="h-4 w-4 mr-2" />
+              Photo
+            </Button>
+            <Button variant="ghost" size="sm">
+              <Hash className="h-4 w-4 mr-2" />
+              Tag
+            </Button>
+          </div>
+          <Link to="/compose">
+            <Button size="sm" data-testid="compose-link">
+              <Edit className="h-4 w-4 mr-2" />
+              {t('post.create')}
+            </Button>
+          </Link>
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 
-const SearchBar = () => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState({ users: [], posts: [] });
-  const [showResults, setShowResults] = useState(false);
-  const [loading, setLoading] = useState(false);
+const PostCard = ({ post, author, userLiked, userSaved, onUpdate }) => {
+  const [showComments, setShowComments] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState('');
+  const [commentLoading, setCommentLoading] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
+  const { user } = useAuth();
+  const { t } = useLanguage();
 
-  const handleSearch = async (query) => {
-    if (!query.trim()) {
-      setSearchResults({ users: [], posts: [] });
-      setShowResults(false);
-      return;
-    }
-
-    setLoading(true);
+  const fetchComments = async () => {
     try {
-      const response = await axios.get(`${API}/search?q=${encodeURIComponent(query)}`);
-      setSearchResults(response.data);
-      setShowResults(true);
+      const response = await axios.get(`${API}/posts/${post.id}/comments`);
+      setComments(response.data);
     } catch (error) {
-      toast.error("Search failed");
-    } finally {
-      setLoading(false);
+      toast.error("Failed to load comments");
     }
   };
 
-  useEffect(() => {
-    const debounce = setTimeout(() => {
-      handleSearch(searchQuery);
-    }, 300);
+  const handleLike = async () => {
+    try {
+      const response = await axios.post(`${API}/posts/${post.id}/like`);
+      const newLikedState = response.data.liked;
+      
+      if (onUpdate) {
+        onUpdate(post.id, {
+          likes_count: post.likes_count + (newLikedState ? 1 : -1),
+          user_liked: newLikedState
+        });
+      }
+    } catch (error) {
+      toast.error("Failed to like post");
+    }
+  };
 
-    return () => clearTimeout(debounce);
-  }, [searchQuery]);
+  const handleSave = async () => {
+    try {
+      const response = await axios.post(`${API}/posts/${post.id}/save`);
+      const newSavedState = response.data.saved;
+      
+      if (onUpdate) {
+        onUpdate(post.id, {
+          saves_count: post.saves_count + (newSavedState ? 1 : -1),
+          user_saved: newSavedState
+        });
+      }
+      
+      toast.success(newSavedState ? "Post saved" : "Post unsaved");
+    } catch (error) {
+      toast.error("Failed to save post");
+    }
+  };
+
+  const handleComment = async (e) => {
+    e.preventDefault();
+    if (!newComment.trim()) return;
+    
+    setCommentLoading(true);
+    try {
+      await axios.post(`${API}/posts/${post.id}/comments`, {
+        content: newComment.trim()
+      });
+      
+      setNewComment('');
+      fetchComments();
+      
+      if (onUpdate) {
+        onUpdate(post.id, {
+          comments_count: post.comments_count + 1
+        });
+      }
+    } catch (error) {
+      toast.error("Failed to add comment");
+    } finally {
+      setCommentLoading(false);
+    }
+  };
+
+  const handleShare = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: `Post by ${author.name}`,
+        text: post.content,
+        url: `${window.location.origin}/post/${post.id}`
+      });
+    } else {
+      navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
+      toast.success("Link copied to clipboard");
+    }
+  };
+
+  const renderContent = (content) => {
+    return content
+      .replace(/#(\w+)/g, '<span class="text-blue-500 font-medium cursor-pointer">#$1</span>')
+      .replace(/@(\w+)/g, '<span class="text-purple-500 font-medium cursor-pointer">@$1</span>');
+  };
+
+  useEffect(() => {
+    if (showComments) {
+      fetchComments();
+    }
+  }, [showComments]);
 
   return (
-    <div className="flex-1 max-w-md mx-8 relative">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-        <Input
-          type="text"
-          placeholder="Search users and posts..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-10"
-          data-testid="search-input"
-        />
-        {loading && (
-          <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin" />
-        )}
-      </div>
-
-      {showResults && (
-        <Card className="absolute top-full mt-2 w-full max-h-96 overflow-y-auto z-50">
-          <CardContent className="p-0">
-            {searchResults.users.length > 0 && (
-              <div className="p-4">
-                <h3 className="font-semibold text-sm text-gray-600 mb-2">People</h3>
-                {searchResults.users.map((user) => (
-                  <div 
-                    key={user.id} 
-                    className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                    onClick={() => {
-                      window.location.href = `/@${user.username}`;
-                      setShowResults(false);
-                    }}
+    <Card className="mb-6 hover-lift" data-testid={`post-${post.id}`}>
+      <CardContent className="pt-6">
+        <div className="flex items-start space-x-4">
+          <Link to={`/@${author?.username}`}>
+            <Avatar className="h-10 w-10">
+              <AvatarImage src={author?.avatar} />
+              <AvatarFallback>{author?.name?.[0]?.toUpperCase()}</AvatarFallback>
+            </Avatar>
+          </Link>
+          
+          <div className="flex-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 mb-2">
+                <Link to={`/@${author?.username}`} className="font-semibold text-gray-900 dark:text-gray-100 hover:underline">
+                  {author?.name}
+                </Link>
+                <span className="text-gray-500 dark:text-gray-400">@{author?.username}</span>
+                <span className="text-gray-400">·</span>
+                <span className="text-gray-500 text-sm">
+                  {new Date(post.created_at).toLocaleDateString()}
+                </span>
+                {post.visibility === 'followers' && (
+                  <Badge variant="outline" className="text-xs">
+                    <Users className="h-3 w-3 mr-1" />
+                    {t('post.followers_only')}
+                  </Badge>
+                )}
+              </div>
+              
+              {user?.id === author?.id && (
+                <div className="relative">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowOptions(!showOptions)}
                   >
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={user.avatar} />
-                      <AvatarFallback>{user.name[0]}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium text-sm">{user.name}</p>
-                      <p className="text-gray-500 text-xs">@{user.username}</p>
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                  
+                  {showOptions && (
+                    <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border rounded-lg shadow-lg z-10">
+                      <Button variant="ghost" size="sm" className="w-full justify-start">
+                        <Edit className="h-4 w-4 mr-2" />
+                        {t('post.edit')}
+                      </Button>
+                      <Button variant="ghost" size="sm" className="w-full justify-start text-red-600">
+                        <Trash className="h-4 w-4 mr-2" />
+                        {t('post.delete')}
+                      </Button>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
             
-            {searchResults.posts.length > 0 && (
-              <div className="p-4 border-t">
-                <h3 className="font-semibold text-sm text-gray-600 mb-2">Posts</h3>
-                {searchResults.posts.map(({ post, author }) => (
-                  <div 
-                    key={post.id} 
-                    className="p-2 hover:bg-gray-50 rounded cursor-pointer"
+            <div 
+              className="text-gray-800 dark:text-gray-200 mb-4 whitespace-pre-wrap"
+              dangerouslySetInnerHTML={{ __html: renderContent(post.content) }}
+            />
+            
+            {/* Image Gallery */}
+            {post.images && post.images.length > 0 && (
+              <div className={`grid gap-2 mb-4 rounded-lg overflow-hidden ${
+                post.images.length === 1 ? 'grid-cols-1' : 
+                post.images.length === 2 ? 'grid-cols-2' : 
+                'grid-cols-2'
+              }`}>
+                {post.images.map((image, index) => (
+                  <img
+                    key={index}
+                    src={`${BACKEND_URL}${image}`}
+                    alt={`Post image ${index + 1}`}
+                    className="w-full h-48 object-cover cursor-pointer hover:opacity-90 transition-opacity"
                     onClick={() => {
-                      window.location.href = `/post/${post.id}`;
-                      setShowResults(false);
+                      // Open image modal
+                      window.open(`${BACKEND_URL}${image}`, '_blank');
                     }}
-                  >
-                    <p className="text-sm truncate">{post.content}</p>
-                    <p className="text-xs text-gray-500">by @{author.username}</p>
-                  </div>
+                  />
                 ))}
               </div>
             )}
             
-            {searchResults.users.length === 0 && searchResults.posts.length === 0 && searchQuery && (
-              <div className="p-4 text-center text-gray-500">
-                No results found for "{searchQuery}"
+            {/* Action Buttons */}
+            <div className="flex items-center justify-between text-gray-500">
+              <div className="flex items-center space-x-6">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleLike}
+                  className={`flex items-center space-x-1 ${userLiked ? 'text-pink-500' : ''}`}
+                  data-testid={`like-btn-${post.id}`}
+                >
+                  <Heart className={`h-4 w-4 ${userLiked ? 'fill-current' : ''}`} />
+                  <span>{post.likes_count}</span>
+                </Button>
+                
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowComments(!showComments)}
+                  className="flex items-center space-x-1"
+                  data-testid={`comment-btn-${post.id}`}
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  <span>{post.comments_count}</span>
+                </Button>
+                
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleSave}
+                  className={`flex items-center space-x-1 ${userSaved ? 'text-blue-500' : ''}`}
+                >
+                  <Bookmark className={`h-4 w-4 ${userSaved ? 'fill-current' : ''}`} />
+                </Button>
+                
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleShare}
+                  className="flex items-center space-x-1"
+                >
+                  <Share className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            
+            {/* Comments Section */}
+            {showComments && (
+              <div className="mt-4 space-y-4">
+                <Separator />
+                
+                {/* Comment form */}
+                <form onSubmit={handleComment} className="flex space-x-2">
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={user?.avatar} />
+                    <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 flex space-x-2">
+                    <Input
+                      type="text"
+                      placeholder={t('comment.add')}
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      className="flex-1"
+                      data-testid={`comment-input-${post.id}`}
+                    />
+                    <Button 
+                      type="submit" 
+                      size="sm" 
+                      disabled={!newComment.trim() || commentLoading}
+                      data-testid={`comment-submit-${post.id}`}
+                    >
+                      {commentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </form>
+                
+                {/* Comments list */}
+                <div className="space-y-3">
+                  {comments.map(({ comment, author: commentAuthor, replies }) => (
+                    <div key={comment.id} className="space-y-2">
+                      <div className="flex space-x-2">
+                        <Link to={`/@${commentAuthor?.username}`}>
+                          <Avatar className="h-6 w-6">
+                            <AvatarImage src={commentAuthor?.avatar} />
+                            <AvatarFallback className="text-xs">{commentAuthor?.name?.[0]?.toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                        </Link>
+                        <div className="flex-1">
+                          <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                            <div className="flex items-center space-x-1 mb-1">
+                              <Link to={`/@${commentAuthor?.username}`} className="font-medium text-sm hover:underline">
+                                {commentAuthor?.name}
+                              </Link>
+                              <span className="text-gray-500 text-xs">@{commentAuthor?.username}</span>
+                            </div>
+                            <p className="text-sm text-gray-800 dark:text-gray-200">{comment.content}</p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Replies */}
+                      {replies && replies.length > 0 && (
+                        <div className="ml-8 space-y-2">
+                          {replies.map(({ comment: reply, author: replyAuthor }) => (
+                            <div key={reply.id} className="flex space-x-2">
+                              <Link to={`/@${replyAuthor?.username}`}>
+                                <Avatar className="h-5 w-5">
+                                  <AvatarImage src={replyAuthor?.avatar} />
+                                  <AvatarFallback className="text-xs">{replyAuthor?.name?.[0]?.toUpperCase()}</AvatarFallback>
+                                </Avatar>
+                              </Link>
+                              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-2 flex-1">
+                                <div className="flex items-center space-x-1 mb-1">
+                                  <Link to={`/@${replyAuthor?.username}`} className="font-medium text-xs hover:underline">
+                                    {replyAuthor?.name}
+                                  </Link>
+                                </div>
+                                <p className="text-xs text-gray-800 dark:text-gray-200">{reply.content}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -806,319 +1125,7 @@ const NotificationsDropdown = ({ onClose }) => {
   );
 };
 
-// Post Component with full functionality
-const PostCard = ({ post, author, userLiked, userSaved, onUpdate }) => {
-  const [showComments, setShowComments] = useState(false);
-  const [comments, setComments] = useState([]);
-  const [newComment, setNewComment] = useState('');
-  const [commentLoading, setCommentLoading] = useState(false);
-  const [showOptions, setShowOptions] = useState(false);
-  const { user } = useAuth();
 
-  const fetchComments = async () => {
-    try {
-      const response = await axios.get(`${API}/posts/${post.id}/comments`);
-      setComments(response.data);
-    } catch (error) {
-      toast.error("Failed to load comments");
-    }
-  };
-
-  const handleLike = async () => {
-    try {
-      const response = await axios.post(`${API}/posts/${post.id}/like`);
-      const newLikedState = response.data.liked;
-      
-      // Optimistic update
-      if (onUpdate) {
-        onUpdate(post.id, {
-          likes_count: post.likes_count + (newLikedState ? 1 : -1),
-          user_liked: newLikedState
-        });
-      }
-    } catch (error) {
-      toast.error("Failed to like post");
-    }
-  };
-
-  const handleSave = async () => {
-    try {
-      const response = await axios.post(`${API}/posts/${post.id}/save`);
-      const newSavedState = response.data.saved;
-      
-      if (onUpdate) {
-        onUpdate(post.id, {
-          saves_count: post.saves_count + (newSavedState ? 1 : -1),
-          user_saved: newSavedState
-        });
-      }
-      
-      toast.success(newSavedState ? "Post saved" : "Post unsaved");
-    } catch (error) {
-      toast.error("Failed to save post");
-    }
-  };
-
-  const handleComment = async (e) => {
-    e.preventDefault();
-    if (!newComment.trim()) return;
-    
-    setCommentLoading(true);
-    try {
-      await axios.post(`${API}/posts/${post.id}/comments`, {
-        content: newComment.trim()
-      });
-      
-      setNewComment('');
-      fetchComments();
-      
-      if (onUpdate) {
-        onUpdate(post.id, {
-          comments_count: post.comments_count + 1
-        });
-      }
-    } catch (error) {
-      toast.error("Failed to add comment");
-    } finally {
-      setCommentLoading(false);
-    }
-  };
-
-  const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: `Post by ${author.name}`,
-        text: post.content,
-        url: `${window.location.origin}/post/${post.id}`
-      });
-    } else {
-      navigator.clipboard.writeText(`${window.location.origin}/post/${post.id}`);
-      toast.success("Link copied to clipboard");
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!window.confirm("Are you sure you want to delete this post?")) return;
-    
-    try {
-      await axios.delete(`${API}/posts/${post.id}`);
-      toast.success("Post deleted");
-      // Remove from UI
-      if (onUpdate) {
-        onUpdate(post.id, null); // null means delete
-      }
-    } catch (error) {
-      toast.error("Failed to delete post");
-    }
-  };
-
-  useEffect(() => {
-    if (showComments) {
-      fetchComments();
-    }
-  }, [showComments]);
-
-  const renderContent = (content) => {
-    // Simple hashtag and mention linking
-    return content.replace(/#(\w+)/g, '<span class="text-blue-500 cursor-pointer">#$1</span>')
-                  .replace(/@(\w+)/g, '<span class="text-purple-500 cursor-pointer">@$1</span>');
-  };
-
-  return (
-    <Card className="mb-6 hover-lift" data-testid={`post-${post.id}`}>
-      <CardContent className="pt-6">
-        <div className="flex items-start space-x-4">
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={author?.avatar} />
-            <AvatarFallback>{author?.name?.[0]?.toUpperCase()}</AvatarFallback>
-          </Avatar>
-          
-          <div className="flex-1">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 mb-2">
-                <span className="font-semibold text-gray-900">{author?.name}</span>
-                <span className="text-gray-500">@{author?.username}</span>
-                <span className="text-gray-400">·</span>
-                <span className="text-gray-500 text-sm">
-                  {new Date(post.created_at).toLocaleDateString()}
-                </span>
-              </div>
-              
-              {user?.id === author?.id && (
-                <div className="relative">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowOptions(!showOptions)}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                  
-                  {showOptions && (
-                    <div className="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-10">
-                      <Button variant="ghost" size="sm" onClick={() => {/* Edit functionality */}}>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={handleDelete} className="text-red-600">
-                        <Trash className="h-4 w-4 mr-2" />
-                        Delete
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            
-            <div 
-              className="text-gray-800 mb-4 whitespace-pre-wrap"
-              dangerouslySetInnerHTML={{ __html: renderContent(post.content) }}
-            />
-            
-            {/* Image Gallery */}
-            {post.images && post.images.length > 0 && (
-              <div className={`grid gap-2 mb-4 ${
-                post.images.length === 1 ? 'grid-cols-1' : 
-                post.images.length === 2 ? 'grid-cols-2' : 
-                'grid-cols-2'
-              }`}>
-                {post.images.map((image, index) => (
-                  <img
-                    key={index}
-                    src={`${BACKEND_URL}${image}`}
-                    alt={`Post image ${index + 1}`}
-                    className="rounded-lg object-cover w-full h-48"
-                  />
-                ))}
-              </div>
-            )}
-            
-            {/* Action Buttons */}
-            <div className="flex items-center justify-between text-gray-500">
-              <div className="flex items-center space-x-6">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleLike}
-                  className={`flex items-center space-x-1 ${userLiked ? 'text-pink-500' : ''}`}
-                  data-testid={`like-btn-${post.id}`}
-                >
-                  <Heart className={`h-4 w-4 ${userLiked ? 'fill-current' : ''}`} />
-                  <span>{post.likes_count}</span>
-                </Button>
-                
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowComments(!showComments)}
-                  className="flex items-center space-x-1"
-                  data-testid={`comment-btn-${post.id}`}
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  <span>{post.comments_count}</span>
-                </Button>
-                
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleSave}
-                  className={`flex items-center space-x-1 ${userSaved ? 'text-blue-500' : ''}`}
-                >
-                  <Bookmark className={`h-4 w-4 ${userSaved ? 'fill-current' : ''}`} />
-                </Button>
-                
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleShare}
-                  className="flex items-center space-x-1"
-                >
-                  <Share className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            
-            {/* Comments Section */}
-            {showComments && (
-              <div className="mt-4 space-y-4">
-                <Separator />
-                
-                {/* Comment form */}
-                <form onSubmit={handleComment} className="flex space-x-2">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={user?.avatar} />
-                    <AvatarFallback>{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 flex space-x-2">
-                    <Input
-                      type="text"
-                      placeholder="Add a comment..."
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      className="flex-1"
-                      data-testid={`comment-input-${post.id}`}
-                    />
-                    <Button 
-                      type="submit" 
-                      size="sm" 
-                      disabled={!newComment.trim() || commentLoading}
-                      data-testid={`comment-submit-${post.id}`}
-                    >
-                      {commentLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </form>
-                
-                {/* Comments list */}
-                <div className="space-y-3">
-                  {comments.map(({ comment, author: commentAuthor, replies }) => (
-                    <div key={comment.id} className="space-y-2">
-                      <div className="flex space-x-2">
-                        <Avatar className="h-6 w-6">
-                          <AvatarImage src={commentAuthor?.avatar} />
-                          <AvatarFallback className="text-xs">{commentAuthor?.name?.[0]?.toUpperCase()}</AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1">
-                          <div className="bg-gray-50 rounded-lg p-3">
-                            <div className="flex items-center space-x-1 mb-1">
-                              <span className="font-medium text-sm">{commentAuthor?.name}</span>
-                              <span className="text-gray-500 text-xs">@{commentAuthor?.username}</span>
-                            </div>
-                            <p className="text-sm text-gray-800">{comment.content}</p>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Replies */}
-                      {replies && replies.length > 0 && (
-                        <div className="ml-8 space-y-2">
-                          {replies.map(({ comment: reply, author: replyAuthor }) => (
-                            <div key={reply.id} className="flex space-x-2">
-                              <Avatar className="h-5 w-5">
-                                <AvatarImage src={replyAuthor?.avatar} />
-                                <AvatarFallback className="text-xs">{replyAuthor?.name?.[0]?.toUpperCase()}</AvatarFallback>
-                              </Avatar>
-                              <div className="bg-gray-50 rounded-lg p-2 flex-1">
-                                <div className="flex items-center space-x-1 mb-1">
-                                  <span className="font-medium text-xs">{replyAuthor?.name}</span>
-                                </div>
-                                <p className="text-xs text-gray-800">{reply.content}</p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
 
 // Feed Components
 const InfiniteScrollFeed = ({ fetchFunction, emptyMessage = "No posts to show" }) => {
@@ -1691,21 +1698,27 @@ const AppContent = () => {
   const isMobile = window.innerWidth < 768;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 pb-16 md:pb-0">
-      <DesktopNavigation />
-      <MobileNavigation />
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 dark:from-gray-900 dark:to-gray-800 pb-16 md:pb-0">
+      <Navigation />
       
       <main className="min-h-screen">
         <Routes>
           <Route path="/" element={<Navigate to="/feed" replace />} />
           <Route path="/feed" element={<HomeFeed />} />
           <Route path="/explore" element={<ExploreFeed />} />
-          <Route path="/messages" element={<Messages />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/messages" element={<MessagesPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/compose" element={<ComposePage />} />
           <Route path="/@:username" element={<UserProfileWrapper />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/imprint" element={<ImprintPage />} />
           <Route path="*" element={<Navigate to="/feed" replace />} />
         </Routes>
       </main>
+      <CookieBanner />
     </div>
   );
 };
@@ -1717,16 +1730,18 @@ const UserProfileWrapper = () => {
 
 function App() {
   return (
-    <AuthProvider>
-      <NotificationProvider>
-        <BrowserRouter>
-          <AppContent />
-        </BrowserRouter>
-      </NotificationProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <NotificationProvider>
+            <BrowserRouter>
+              <AppContent />
+            </BrowserRouter>
+          </NotificationProvider>
+        </AuthProvider>
+      </LanguageProvider>
+    </ThemeProvider>
   );
 }
 
 export default App;
-
-// Continue in next message due to length...
