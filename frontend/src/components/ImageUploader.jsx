@@ -40,7 +40,13 @@ const ImageUploader = ({ images, setImages, disabled = false }) => {
     }
 
     const remaining = MAX_IMAGES - images.length;
-    const selected = Array.from(files).slice(0, remaining);
+    const arr = Array.from(files);
+    const selected = arr.slice(0, remaining);
+    const overflow = Math.max(arr.length - selected.length, 0);
+    if (overflow > 0) {
+      toast.error(`+${overflow} not added (max ${MAX_IMAGES})`);
+    }
+
     const valid = validateFiles(selected);
     if (valid.length === 0) return;
 
@@ -53,6 +59,7 @@ const ImageUploader = ({ images, setImages, disabled = false }) => {
         const res = await axios.post(`${API}/upload/image`, fd, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
+        // use filename as returned path order; keep order of valid files
         uploaded.push(res.data.url);
       }
       if (uploaded.length) {
