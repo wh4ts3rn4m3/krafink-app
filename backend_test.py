@@ -287,6 +287,334 @@ class KrafinkAPITester:
         
         return False, False
 
+    def create_test_image(self):
+        """Create a small test image in memory"""
+        from PIL import Image
+        import io
+        
+        # Create a small 100x100 red image
+        img = Image.new('RGB', (100, 100), color='red')
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='JPEG')
+        img_bytes.seek(0)
+        return img_bytes.getvalue()
+
+    def test_profiles_milestone_comprehensive(self):
+        """Comprehensive test for Profiles milestone backend endpoints"""
+        print("\n🎯 Starting Profiles Milestone Comprehensive Test")
+        print("=" * 60)
+        
+        # Step 1: Register specific user as requested
+        user_data = {
+            "email": "user1+profiles@example.com",
+            "username": "user1profiles", 
+            "name": "User One",
+            "password": "Pass123!"
+        }
+        
+        print("Step 1: Registering user...")
+        success, response = self.run_test(
+            "Register User1 for Profiles Test",
+            "POST", 
+            "auth/register",
+            200,
+            data=user_data
+        )
+        
+        if not success:
+            print("❌ Registration failed, stopping profiles test")
+            return False
+            
+        # Store token for subsequent calls
+        if 'access_token' in response:
+            self.token = response['access_token']
+            self.current_user = response['user']
+            print(f"✅ User registered with ID: {self.current_user.get('id')}")
+        else:
+            print("❌ No access token in registration response")
+            return False
+        
+        # Step 2: Set Authorization header (already done via self.token)
+        print("Step 2: Authorization header set")
+        
+        # Step 3: GET /api/auth/me
+        print("Step 3: Testing GET /api/auth/me...")
+        success, me_response = self.run_test(
+            "Get Current User Profile",
+            "GET",
+            "auth/me", 
+            200
+        )
+        
+        if success:
+            # Verify required fields
+            required_fields = ['id', 'username', 'name', 'links']
+            missing_fields = []
+            for field in required_fields:
+                if field not in me_response:
+                    missing_fields.append(field)
+            
+            if missing_fields:
+                self.log_test("Verify /auth/me fields", False, f"Missing fields: {missing_fields}")
+            else:
+                self.log_test("Verify /auth/me fields", True)
+                print(f"✅ User fields verified: {list(me_response.keys())}")
+        
+        # Step 4: PUT /api/users/profile with links
+        print("Step 4: Testing profile update with links...")
+        profile_update_data = {
+            "name": "User One Updated",
+            "bio": "Bio for user one", 
+            "links": [
+                {"label": "Site", "url": "https://example.com"},
+                {"label": "GitHub", "url": "github.com/u1"}
+            ],
+            "avatar": None,
+            "banner": None
+        }
+        
+        success, profile_response = self.run_test(
+            "Update Profile with Links",
+            "PUT",
+            "users/profile",
+            200,
+            data=profile_update_data
+        )
+        
+        if success:
+            # Verify response contains updated data
+            if profile_response.get('name') == "User One Updated":
+                self.log_test("Profile name update", True)
+            else:
+                self.log_test("Profile name update", False, f"Expected 'User One Updated', got {profile_response.get('name')}")
+            
+            # Verify links array
+            links = profile_response.get('links', [])
+            if isinstance(links, list) and len(links) == 2:
+                self.log_test("Profile links update", True)
+                print(f"✅ Links updated: {links}")
+            else:
+                self.log_test("Profile links update", False, f"Expected 2 links, got {links}")
+        
+        # Step 5: Upload image
+        print("Step 5: Testing image upload...")
+        try:
+            import requests
+            
+            # Create test image
+            image_data = self.create_test_image()
+            
+            # Upload image using multipart/form-data
+            files = {'file': ('test.jpg', image_data, 'image/jpeg')}
+            headers = {'Authorization': f'Bearer {self.token}'}
+            
+            upload_response = requests.post(
+                f"{self.api_url}/upload/image",
+                files=files,
+                headers=headers,
+                timeout=10
+            )
+            
+            if upload_response.status_code == 200:
+                upload_data = upload_response.json()
+                if 'url' in upload_data and upload_data['url'].startswith('/uploads/'):
+                    self.log_test("Image Upload", True)
+                    uploaded_url = upload_data['url']
+                    print(f"✅ Image uploaded: {uploaded_url}")
+                else:
+                    self.log_test("Image Upload", False, f"Invalid upload response: {upload_data}")
+                    uploaded_url = None
+            else:
+                self.log_test("Image Upload", False, f"Upload failed with status {upload_response.status_code}: {upload_response.text}")
+                uploaded_url = None
+                
+        except Exception as e:
+            self.log_test("Image Upload", False, f"Upload exception: {str(e)}")
+            uploaded_url = None
+        
+        # Step 6: Update profile with avatar and banner
+        if uploaded_url:
+            print("Step 6: Testing profile update with avatar/banner...")
+            avatar_banner_data = {
+                "avatar": uploaded_url,
+                "banner": uploaded_url
+            }
+            
+            success, avatar_response = self.run_test(
+                "Update Profile with Avatar/Banner",
+                "PUT",
+                "users/profile",
+                200,
+                data=avatar_banner_data
+            )
+            
+            if success:
+                if avatar_response.get('avatar') == uploaded_url and avatar_response.get('banner') == uploaded_url:
+                    self.log_test("Avatar/Banner Update", True)
+                    print(f"✅ Avatar and banner set to: {uploaded_url}")
+                else:
+                    self.log_test("Avatar/Banner Update", False, f"Avatar: {avatar_response.get('avatar')}, Banner: {avatar_response.get('banner')}")
+        else:
+            print("⚠️ Skipping avatar/banner update due to upload failure")
+        
+        # Step 7: Create two posts
+        print("Step 7: Creating test posts...")
+        
+        # First post with image
+        post1_data = {
+            "content": "My first post #intro",
+            "images": [uploaded_url] if uploaded_url else [],
+            "visibility": "public",
+            "hashtags": ["intro"],
+            "mentions": []
+        }
+        
+        success1, post1_response = self.run_test(
+            "Create First Post",
+            "POST",
+            "posts",
+            200,
+            data=post1_data
+        )
+        
+        post1_id = post1_response.get('id') if success1 else None
+        
+        # Second post without image
+        post2_data = {
+            "content": "Second post",
+            "images": [],
+            "visibility": "public", 
+            "hashtags": [],
+            "mentions": []
+        }
+        
+        success2, post2_response = self.run_test(
+            "Create Second Post",
+            "POST",
+            "posts",
+            200,
+            data=post2_data
+        )
+        
+        post2_id = post2_response.get('id') if success2 else None
+        
+        if success1 and success2:
+            print(f"✅ Created posts with IDs: {post1_id}, {post2_id}")
+        
+        # Step 8: Fetch user posts
+        print("Step 8: Testing user posts endpoint...")
+        success, posts_response = self.run_test(
+            "Get User Posts",
+            "GET",
+            f"users/user1profiles/posts?limit=50",
+            200
+        )
+        
+        if success:
+            if isinstance(posts_response, list):
+                self.log_test("User Posts Response Type", True)
+                print(f"✅ Retrieved {len(posts_response)} posts")
+                
+                # Verify post structure
+                if len(posts_response) >= 2:
+                    self.log_test("User Posts Count", True, f"Found {len(posts_response)} posts")
+                    
+                    # Check first post structure
+                    first_post = posts_response[0]
+                    required_keys = ['post', 'author', 'user_liked', 'user_saved']
+                    if all(key in first_post for key in required_keys):
+                        self.log_test("Post Structure", True)
+                        
+                        # Verify author username
+                        author = first_post.get('author', {})
+                        if author.get('username') == 'user1profiles':
+                            self.log_test("Post Author Username", True)
+                        else:
+                            self.log_test("Post Author Username", False, f"Expected 'user1profiles', got {author.get('username')}")
+                        
+                        # Check images format
+                        post_data = first_post.get('post', {})
+                        images = post_data.get('images', [])
+                        if images:
+                            valid_images = all(isinstance(img, str) and img.startswith('/uploads') for img in images)
+                            if valid_images:
+                                self.log_test("Post Images Format", True)
+                            else:
+                                self.log_test("Post Images Format", False, f"Invalid image format: {images}")
+                        else:
+                            self.log_test("Post Images Format", True, "No images to validate")
+                            
+                    else:
+                        missing_keys = [key for key in required_keys if key not in first_post]
+                        self.log_test("Post Structure", False, f"Missing keys: {missing_keys}")
+                else:
+                    self.log_test("User Posts Count", False, f"Expected >= 2 posts, got {len(posts_response)}")
+            else:
+                self.log_test("User Posts Response Type", False, f"Expected list, got {type(posts_response)}")
+        
+        # Step 9: GET user by username
+        print("Step 9: Testing GET user by username...")
+        success, user_response = self.run_test(
+            "Get User by Username",
+            "GET",
+            "users/user1profiles",
+            200
+        )
+        
+        if success:
+            # Verify links array preserved
+            links = user_response.get('links', [])
+            if isinstance(links, list) and len(links) == 2:
+                # Check if links have label/url structure
+                valid_links = True
+                for link in links:
+                    if isinstance(link, dict):
+                        if 'label' not in link or 'url' not in link:
+                            valid_links = False
+                            break
+                    elif not isinstance(link, str):
+                        valid_links = False
+                        break
+                
+                if valid_links:
+                    self.log_test("User Links Preserved", True)
+                else:
+                    self.log_test("User Links Preserved", False, f"Invalid link structure: {links}")
+            else:
+                self.log_test("User Links Preserved", False, f"Expected 2 links, got {links}")
+            
+            # Verify avatar/banner present
+            avatar = user_response.get('avatar')
+            banner = user_response.get('banner')
+            if avatar and banner:
+                self.log_test("Avatar/Banner Present", True)
+                print(f"✅ Avatar: {avatar}, Banner: {banner}")
+            else:
+                self.log_test("Avatar/Banner Present", False, f"Avatar: {avatar}, Banner: {banner}")
+        
+        # Step 10: Test followers endpoint
+        print("Step 10: Testing followers endpoint...")
+        user_id = self.current_user.get('id')
+        if user_id:
+            success, followers_response = self.run_test(
+                "Get User Followers",
+                "GET",
+                f"users/{user_id}/followers",
+                200
+            )
+            
+            if success:
+                if isinstance(followers_response, list):
+                    self.log_test("Followers Response Type", True)
+                    print(f"✅ Followers endpoint returned array with {len(followers_response)} followers")
+                else:
+                    self.log_test("Followers Response Type", False, f"Expected list, got {type(followers_response)}")
+        else:
+            self.log_test("Get User Followers", False, "No user ID available")
+        
+        print("\n🎯 Profiles Milestone Test Complete")
+        return True
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting Krafink API Testing Suite")
