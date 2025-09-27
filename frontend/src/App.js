@@ -1698,21 +1698,27 @@ const AppContent = () => {
   const isMobile = window.innerWidth < 768;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 pb-16 md:pb-0">
-      <DesktopNavigation />
-      <MobileNavigation />
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50 dark:from-gray-900 dark:to-gray-800 pb-16 md:pb-0">
+      <Navigation />
       
       <main className="min-h-screen">
         <Routes>
           <Route path="/" element={<Navigate to="/feed" replace />} />
           <Route path="/feed" element={<HomeFeed />} />
           <Route path="/explore" element={<ExploreFeed />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route path="/messages" element={<Messages />} />
           <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/compose" element={<ComposePage />} />
           <Route path="/@:username" element={<UserProfileWrapper />} />
+          <Route path="/admin" element={<AdminPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/imprint" element={<ImprintPage />} />
           <Route path="*" element={<Navigate to="/feed" replace />} />
         </Routes>
       </main>
+      <CookieBanner />
     </div>
   );
 };
