@@ -41,6 +41,7 @@ const SearchPage = () => {
   }, []);
 
   const performSearch = async (searchQuery) => {
+    setSelectedIndex(-1);
     if (!searchQuery.trim()) {
       setResults({ users: [], posts: [] });
       return;
