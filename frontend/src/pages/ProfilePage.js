@@ -399,6 +399,45 @@ const ProfilePage = () => {
     }
   }, [profileUser, activeTab]);
 
+  useEffect(() => {
+    // Live follow updates via socket
+    if (window && window.io && !window.__krafinkFollowListener) {
+      window.__krafinkFollowListener = true;
+      try {
+        const s = window.__krafinkSocketInstance; // not set currently; safe no-op
+      } catch (e) {}
+    }
+    if (window && !window.__followUpdatedHandler) {
+      window.__followUpdatedHandler = (data) => {
+        if (!profileUser) return;
+        const { follower_id, following_id, following, following_counts } = data || {};
+        if (following_id === profileUser.id) {
+          setProfileUser(prev => ({
+            ...prev,
+            followers_count: following_counts?.followers_count ?? prev.followers_count
+          }));
+        }
+        if (follower_id === profileUser.id && currentUser?.id === profileUser.id) {
+          // my following count changed
+          setProfileUser(prev => ({
+            ...prev,
+            following_count: data?.follower_counts?.following_count ?? prev.following_count
+          }));
+        }
+      };
+      if (window && window.__emergent_socketio) {
+        window.__emergent_socketio.on('follow_updated', window.__followUpdatedHandler);
+      }
+    }
+    return () => {
+      try {
+        if (window && window.__emergent_socketio && window.__followUpdatedHandler) {
+          window.__emergent_socketio.off('follow_updated', window.__followUpdatedHandler);
+        }
+      } catch (e) {}
+    };
+  }, [profileUser, currentUser]);
+
   const fetchProfile = async () => {
     setLoading(true);
     try {
