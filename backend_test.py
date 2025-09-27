@@ -997,8 +997,8 @@ def main():
     """Main test execution"""
     tester = KrafinkAPITester()
     
-    # Run the specific Profiles milestone test as requested
-    results = tester.run_profiles_milestone_test()
+    # Run the specific Follow milestone test as requested
+    results = tester.run_follow_milestone_test()
     
     # Return appropriate exit code
     return 0 if results["passed_tests"] == results["total_tests"] else 1
