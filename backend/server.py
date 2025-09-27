@@ -1036,7 +1036,29 @@ async def toggle_follow(username: str, current_user: User = Depends(get_current_
             {"id": target_user_id},
             {"$inc": {"followers_count": -1}}
         )
-        return {"following": False}
+        
+        # Fetch updated users for counts
+        me_doc = await db.users.find_one({"id": current_user.id})
+        target_doc = await db.users.find_one({"id": target_user_id})
+        me_doc = parse_from_mongo(me_doc)
+        target_doc = parse_from_mongo(target_doc)
+        
+        payload = {
+            "follower_id": current_user.id,
+            "following_id": target_user_id,
+            "following": False,
+            "follower_counts": {
+                "following_count": me_doc.get("following_count", 0)
+            },
+            "following_counts": {
+                "followers_count": target_doc.get("followers_count", 0)
+            }
+        }
+        # Emit socket events to both users' rooms
+        await sio.emit('follow_updated', payload, room=f"user_{target_user_id}")
+        await sio.emit('follow_updated', payload, room=f"user_{current_user.id}")
+
+        return {"following": False, "followers_count": target_doc.get("followers_count", 0)}
     else:
         # Follow
         follow = Follow(follower_id=current_user.id, following_id=target_user_id)
@@ -1061,7 +1083,40 @@ async def toggle_follow(username: str, current_user: User = Depends(get_current_
             message=f"{current_user.name} started following you"
         )
         
-        return {"following": True}
+        # Fetch updated users for counts
+        me_doc = await db.users.find_one({"id": current_user.id})
+        target_doc = await db.users.find_one({"id": target_user_id})
+        me_doc = parse_from_mongo(me_doc)
+        target_doc = parse_from_mongo(target_doc)
+        
+        payload = {
+            "follower_id": current_user.id,
+            "following_id": target_user_id,
+            "following": True,
+            "follower_counts": {
+                "following_count": me_doc.get("following_count", 0)
+            },
+            "following_counts": {
+                "followers_count": target_doc.get("followers_count", 0)
+            }
+        }
+        await sio.emit('follow_updated', payload, room=f"user_{target_user_id}")
+        await sio.emit('follow_updated', payload, room=f"user_{current_user.id}")
+
+        return {"following": True, "followers_count": target_doc.get("followers_count", 0)}
+
+@api_router.get("/users/{username}/is-following")
+async def is_following(username: str, current_user: User = Depends(get_current_user)):
+    target_user_doc = await db.users.find_one({"username": username})
+    if not target_user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    target_user_id = target_user_doc["id"]
+
+    existing_follow = await db.follows.find_one({
+        "follower_id": current_user.id,
+        "following_id": target_user_id
+    })
+    return {"following": existing_follow is not None}
 
 # Message Routes
 @api_router.get("/conversations")
