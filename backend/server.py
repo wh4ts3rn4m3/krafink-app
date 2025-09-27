@@ -80,7 +80,7 @@ class User(BaseModel):
     avatar: Optional[str] = None
     banner: Optional[str] = None
     bio: Optional[str] = None
-    links: Optional[List[str]] = []
+    links: Optional[List[Union[str, LinkItem]]] = []
     followers_count: int = 0
     following_count: int = 0
     is_private: bool = False
