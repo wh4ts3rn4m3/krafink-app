@@ -33,7 +33,6 @@ import { toast } from "sonner";
 // Pages
 import SearchPage from "./pages/SearchPage";
 import MessagesPage from "./pages/MessagesPage";
-import NotificationsPage from "./pages/NotificationsPage";
 import ComposePage from "./pages/ComposePage";
 import AdminPage from "./pages/AdminPage";
 import { TermsPage, PrivacyPage, ImprintPage, CookieBanner } from "./pages/LegalPages";
