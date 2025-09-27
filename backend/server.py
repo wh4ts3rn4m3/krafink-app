@@ -624,7 +624,6 @@ async def get_feed(current_user: User = Depends(get_current_user), limit: int = 
     # Get posts from followed users + own posts
     following_docs = await db.follows.find({"follower_id": current_user.id}).to_list(None)
     following_ids = [doc["following_id"] for doc in following_docs]
-    following_ids.append(current_user.id)  # Include own posts
     
     # Check for blocked users
     blocked_docs = await db.blocks.find({"blocker_id": current_user.id}).to_list(None)
