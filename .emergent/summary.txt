@@ -1,0 +1,58 @@
+<analysis>
+Project: krafink — social-only MVP (no marketplace/3D).
+Repo/branch: krafink-app @ rebuild.
+Status: Auth + feed OK, basic DMs OK, EN/DE toggle present.
+Profiles in progress: ProfilePage.js added, routing /@:handle wired, avatars/names link to profiles.
+Goal: finish core social so all visible UI works end-to-end.
+
+</analysis>
+<product_requirements>
+Scope now = Social MVP:
+• Auth & Profiles (view /@handle, edit avatar/bio/links)
+• Posts & Feed (text + images), likes, comments
+• Follow system with counts; Home shows followed users
+• Messaging (1:1 real-time), Notifications (clickable + read states)
+• Search (People, Posts)
+• Privacy (public / followers-only)
+• Legal & i18n (EN/DE UI)
+
+</product_requirements>
+<key_technical_concepts>
+Frontend: React + Tailwind + shadcn/ui, React Router, socket.io-client.
+Backend: FastAPI + MongoDB (Motor), python-socketio, JWT.
+Real-time: WebSockets for DMs/notifications.
+I18n/accessibility: EN/DE UI strings, a11y basics.
+
+</key_technical_concepts>
+<code_architecture>
+/app
+ ├─ backend/ (FastAPI, sockets, auth, posts, messages)
+ └─ frontend/
+     └─ src/
+        ├─ pages (Feed, Messages, Notifications, Legal, ProfilePage)
+        ├─ components/ui (post-card, user-card, tabs)
+        ├─ contexts (Theme, Notification)
+        └─ App.js (routes; /@:handle wired)
+
+</code_architecture>
+<pending_tasks>
+1) Profiles: Posts/About tabs; Edit Profile (avatar/banner/bio/links); show user’s posts.
+2) Follow: Follow/Unfollow; live counts; Home shows followed users’ posts.
+3) Composer images: multi-image upload w/ preview/remove; render in feed.
+4) Search crash: People→profile must open correct profile (fix “undefined id”).
+5) Notifications: items clickable to targets; mark-as-read/all-read; live badge.
+6) DM polish: new-message user search; typing/read receipts (if supported).
+7) Privacy: followers-only visibility correct.
+
+</pending_tasks>
+<current_work>
+Implementing Profiles. ProfilePage.js created; App.js routes /@:handle.
+Avatars/names navigate to profiles. UI for tabs, edit, and posts still pending.
+
+</current_work>
+<optional_next_step>
+Finish Profiles (tabs, Edit Profile, user posts), then Follow, Composer images,
+Search crash fix, Notifications, DM polish, and followers-only visibility — in that order.
+Push incremental updates to krafink-app @ rebuild and share preview after Profiles.
+
+</optional_next_step>
