@@ -137,6 +137,9 @@
 
 ## test_plan:
   current_focus:
+  - agent: "main"
+    message: "Next: backend test register/login, profile update (links label+url), upload image returns URL, create posts and fetch via /api/users/{username}/posts. Then manual UI test for ProfilePage."
+
     - "Profiles backend endpoints and serialization"
     - "ProfilePage UI interactions: open edit modal, upload avatar/banner, edit bio/links, verify posts list"
   stuck_tasks:
