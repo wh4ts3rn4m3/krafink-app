@@ -664,6 +664,16 @@ class KrafinkAPITester:
         
         return self.get_results()
 
+    def run_profiles_milestone_test(self):
+        """Run only the Profiles milestone comprehensive test"""
+        print("🚀 Starting Profiles Milestone Test Suite")
+        print("=" * 50)
+        
+        # Run the comprehensive profiles test
+        self.test_profiles_milestone_comprehensive()
+        
+        return self.get_results()
+
     def get_results(self):
         """Get test results summary"""
         print("\n" + "=" * 50)
