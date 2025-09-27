@@ -87,10 +87,16 @@ class User(BaseModel):
     is_blocked: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class LinkItem(BaseModel):
+    label: str
+    url: str
+
 class UserProfile(BaseModel):
     name: Optional[str] = None
     bio: Optional[str] = None
-    links: Optional[List[str]] = None
+    links: Optional[List[Union[str, LinkItem]]] = None
+    avatar: Optional[str] = None
+    banner: Optional[str] = None
     is_private: Optional[bool] = None
 
 class PostCreate(BaseModel):
