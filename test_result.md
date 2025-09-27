@@ -101,3 +101,49 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## user_problem_statement: Build krafink social MVP end-to-end. Implement Profiles (tabs, Edit Profile with avatar/banner/bio/links), Follow system, multi-image composer, search fix, notifications, DM polish, and privacy.
+
+## backend:
+  - task: "User profile: support links array (label+url), avatar/banner upload, user posts endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Added LinkItem model; updated User and UserProfile models; kept /api/upload/image; added /api/users/{username}/posts endpoint; preserved '/api' prefix and env usage."
+
+## frontend:
+  - task: "Profile Page: Tabs (Posts/About), Edit Profile modal (avatar/banner/bio/links), render user posts"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/ProfilePage.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Implemented tabs, edit modal with image upload via /api/upload/image, multi-link editor, user posts fetch via new backend endpoint, follow/unfollow UI, i18n strings used where available."
+
+## metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+## test_plan:
+  current_focus:
+    - "Profiles backend endpoints and serialization"
+    - "ProfilePage UI interactions: open edit modal, upload avatar/banner, edit bio/links, verify posts list"
+  stuck_tasks:
+    - "None"
+  test_all: false
+  test_priority: "sequential"
+
+## agent_communication:
+  - agent: "main"
+    message: "Please test the new /api/users/{username}/posts endpoint and ProfilePage flows. After manual verification, I can run frontend automation if requested."
