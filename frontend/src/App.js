@@ -1711,7 +1711,7 @@ const AppContent = () => {
           <Route path="/messages" element={<MessagesPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/compose" element={<ComposePage />} />
-          <Route path="/@:username" element={<UserProfileWrapper />} />
+          <Route path="/@:username" element={<ProfilePage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
