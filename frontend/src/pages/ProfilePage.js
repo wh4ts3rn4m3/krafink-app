@@ -447,11 +447,12 @@ const ProfilePage = () => {
     try {
       const response = await axios.post(`${API}/users/${username}/follow`);
       const newFollowState = response.data.following;
-      
+      const updatedFollowers = response.data.followers_count ?? (profileUser.followers_count + (newFollowState ? 1 : -1));
+
       setIsFollowing(newFollowState);
       setProfileUser(prev => ({
         ...prev,
-        followers_count: prev.followers_count + (newFollowState ? 1 : -1)
+        followers_count: updatedFollowers
       }));
       
       toast.success(newFollowState ? `Following ${profileUser.name}` : `Unfollowed ${profileUser.name}`);
