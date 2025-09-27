@@ -19,7 +19,8 @@ const ImageUploader = ({ images, setImages, disabled = false }) => {
   const validateFiles = (files) => {
     const valid = [];
     for (const file of files) {
-      if (!ACCEPTED_TYPES.includes(file.type)) {
+      const type = (file.type || '').toLowerCase();
+      if (!ACCEPTED_TYPES.includes(type)) {
         toast.error(`${file.name}: Only JPG/PNG/WEBP allowed`);
         continue;
       }
