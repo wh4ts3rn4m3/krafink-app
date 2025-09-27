@@ -110,11 +110,14 @@
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "Added LinkItem model; updated User and UserProfile models; kept /api/upload/image; added /api/users/{username}/posts endpoint; preserved '/api' prefix and env usage."
+      - working: true
+        agent: "testing"
+        comment: "COMPREHENSIVE TEST PASSED: All 22 Profiles milestone tests passed. Tested user registration (user1+profiles@example.com), authentication, profile updates with links array (label+url structure), image upload (/uploads/ URLs), avatar/banner setting, post creation with images, user posts endpoint returning proper structure with author/user_liked/user_saved fields, user profile retrieval with preserved links, and followers endpoint. All endpoints working correctly with proper data serialization and response formats."
 
 ## frontend:
   - task: "Profile Page: Tabs (Posts/About), Edit Profile modal (avatar/banner/bio/links), render user posts"
