@@ -456,11 +456,14 @@ const ProfilePage = () => {
     }
   };
 
-  const checkFollowStatus = async (userId) => {
+  const checkFollowStatus = async (userIdOrUsername) => {
     try {
-      const response = await axios.get(`${API}/users/${userId}/followers`);
-      const isUserFollowing = response.data.some(follower => follower.id === currentUser.id);
-      setIsFollowing(isUserFollowing);
+      // Prefer lightweight endpoint by username
+      const uname = typeof userIdOrUsername === 'string' && userIdOrUsername.includes('-') ? profileUser?.username : userIdOrUsername;
+      const usernameToCheck = profileUser?.username || uname;
+      if (!usernameToCheck) return;
+      const response = await axios.get(`${API}/users/${usernameToCheck}/is-following`);
+      setIsFollowing(response.data.following);
     } catch (error) {
       console.error('Failed to check follow status:', error);
     }
