@@ -301,35 +301,52 @@ async def create_notification(user_id: str, type: str, from_user_id: str, messag
     return notification
 
 async def process_image(file: UploadFile) -> str:
-    """Process and save uploaded image"""
-    # Validate file type
-    if not file.content_type.startswith('image/'):
+    """Process and save uploaded image with size/type validation and format sniffing"""
+    # Basic header check (not relied upon for security)
+    if not (file.content_type and file.content_type.startswith('image/')):
         raise HTTPException(status_code=400, detail="File must be an image")
-    
-    # Generate unique filename
-    file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
-    filename = f"{uuid.uuid4()}.{file_extension}"
-    file_path = UPLOAD_DIR / filename
-    
-    # Read and process image
+
+    # Read contents for size and sniffing
     contents = await file.read()
-    
+
+    # Size limit 10MB
+    MAX_SIZE_BYTES = 10 * 1024 * 1024
+    if len(contents) > MAX_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+
+    # Try open via Pillow to sniff format
     try:
         with Image.open(io.BytesIO(contents)) as img:
-            # Convert to RGB if necessary
-            if img.mode in ('RGBA', 'P'):
+            detected_format = (img.format or '').upper()
+            if detected_format not in ('JPEG', 'PNG', 'WEBP'):
+                raise HTTPException(status_code=400, detail="Unsupported image format. Allowed: JPG, PNG, WEBP")
+
+            # Normalize mode
+            if img.mode in ('RGBA', 'P') and detected_format == 'JPEG':
                 img = img.convert('RGB')
-            
+
             # Resize if too large (max 2048x2048)
             max_size = (2048, 2048)
             img.thumbnail(max_size, Image.Resampling.LANCZOS)
-            
-            # Save with compression
-            img.save(file_path, 'JPEG', quality=85, optimize=True)
-            
+
+            # Choose extension based on detected format
+            ext_map = { 'JPEG': 'jpg', 'PNG': 'png', 'WEBP': 'webp' }
+            file_extension = ext_map.get(detected_format, 'jpg')
+            filename = f"{uuid.uuid4()}.{file_extension}"
+            file_path = UPLOAD_DIR / filename
+
+            # Save image with proper encoder
+            save_kwargs = { 'optimize': True }
+            if detected_format == 'JPEG':
+                save_kwargs.update({'quality': 85})
+            img.save(file_path, detected_format, **save_kwargs)
+
+    except HTTPException:
+        # Re-raise HTTP exceptions thrown above
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image file: {str(e)}")
-    
+
     return f"/uploads/{filename}"
 
 # WebSocket Events
