@@ -35,6 +35,7 @@ import SearchPage from "./pages/SearchPage";
 import MessagesPage from "./pages/MessagesPage";
 import ComposePage from "./pages/ComposePage";
 import AdminPage from "./pages/AdminPage";
+import ProfilePage from "./pages/ProfilePage";
 import { TermsPage, PrivacyPage, ImprintPage, CookieBanner } from "./pages/LegalPages";
 
 // Hooks
