@@ -446,7 +446,7 @@ const ProfilePage = () => {
       
       // Check follow status
       if (currentUser && response.data.id !== currentUser.id) {
-        checkFollowStatus(response.data.id);
+        checkFollowStatus(response.data.username);
       }
     } catch (error) {
       toast.error('User not found');
