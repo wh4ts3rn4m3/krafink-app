@@ -72,6 +72,10 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class LinkItem(BaseModel):
+    label: str
+    url: str
+
 class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     email: str
@@ -80,7 +84,7 @@ class User(BaseModel):
     avatar: Optional[str] = None
     banner: Optional[str] = None
     bio: Optional[str] = None
-    links: Optional[List[str]] = []
+    links: Optional[List[Union[str, LinkItem]]] = []
     followers_count: int = 0
     following_count: int = 0
     is_private: bool = False
@@ -90,7 +94,9 @@ class User(BaseModel):
 class UserProfile(BaseModel):
     name: Optional[str] = None
     bio: Optional[str] = None
-    links: Optional[List[str]] = None
+    links: Optional[List[Union[str, LinkItem]]] = None
+    avatar: Optional[str] = None
+    banner: Optional[str] = None
     is_private: Optional[bool] = None
 
 class PostCreate(BaseModel):
@@ -544,6 +550,53 @@ async def get_following(user_id: str, current_user: User = Depends(get_current_u
     
     return following
 
+@api_router.get("/users/{username}/posts", response_model=List[dict])
+async def get_user_posts(username: str, current_user: User = Depends(get_current_user), limit: int = 20, skip: int = 0):
+    target_user_doc = await db.users.find_one({"username": username})
+    if not target_user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    target_user_id = target_user_doc["id"]
+
+    posts_cursor = db.posts.find({
+        "author_id": target_user_id,
+        "visibility": {"$in": ["public", "followers"]}
+    }).sort("created_at", -1).skip(skip).limit(limit)
+
+    posts = await posts_cursor.to_list(None)
+
+    enriched_posts = []
+    for post_doc in posts:
+        post_doc = parse_from_mongo(post_doc)
+
+        # author info
+        author_doc = await db.users.find_one({"id": post_doc["author_id"]})
+        author = None
+        if author_doc:
+            author_doc = parse_from_mongo(author_doc)
+            author = User(**{k: v for k, v in author_doc.items() if k != 'password'})
+
+        # interactions
+        user_liked = await db.likes.find_one({
+            "user_id": current_user.id,
+            "target_id": post_doc["id"],
+            "target_type": "post"
+        }) is not None
+
+        user_saved = await db.saves.find_one({
+            "user_id": current_user.id,
+            "post_id": post_doc["id"]
+        }) is not None
+
+        post = Post(**post_doc)
+        enriched_posts.append({
+            "post": post.dict(),
+            "author": author.dict() if author else None,
+            "user_liked": user_liked,
+            "user_saved": user_saved
+        })
+
+    return enriched_posts
+
 # Post Routes
 @api_router.post("/posts", response_model=Post)
 async def create_post(post_data: PostCreate, current_user: User = Depends(get_current_user)):
@@ -571,7 +624,6 @@ async def get_feed(current_user: User = Depends(get_current_user), limit: int = 
     # Get posts from followed users + own posts
     following_docs = await db.follows.find({"follower_id": current_user.id}).to_list(None)
     following_ids = [doc["following_id"] for doc in following_docs]
-    following_ids.append(current_user.id)  # Include own posts
     
     # Check for blocked users
     blocked_docs = await db.blocks.find({"blocker_id": current_user.id}).to_list(None)
@@ -983,7 +1035,29 @@ async def toggle_follow(username: str, current_user: User = Depends(get_current_
             {"id": target_user_id},
             {"$inc": {"followers_count": -1}}
         )
-        return {"following": False}
+        
+        # Fetch updated users for counts
+        me_doc = await db.users.find_one({"id": current_user.id})
+        target_doc = await db.users.find_one({"id": target_user_id})
+        me_doc = parse_from_mongo(me_doc)
+        target_doc = parse_from_mongo(target_doc)
+        
+        payload = {
+            "follower_id": current_user.id,
+            "following_id": target_user_id,
+            "following": False,
+            "follower_counts": {
+                "following_count": me_doc.get("following_count", 0)
+            },
+            "following_counts": {
+                "followers_count": target_doc.get("followers_count", 0)
+            }
+        }
+        # Emit socket events to both users' rooms
+        await sio.emit('follow_updated', payload, room=f"user_{target_user_id}")
+        await sio.emit('follow_updated', payload, room=f"user_{current_user.id}")
+
+        return {"following": False, "followers_count": target_doc.get("followers_count", 0)}
     else:
         # Follow
         follow = Follow(follower_id=current_user.id, following_id=target_user_id)
@@ -1008,7 +1082,40 @@ async def toggle_follow(username: str, current_user: User = Depends(get_current_
             message=f"{current_user.name} started following you"
         )
         
-        return {"following": True}
+        # Fetch updated users for counts
+        me_doc = await db.users.find_one({"id": current_user.id})
+        target_doc = await db.users.find_one({"id": target_user_id})
+        me_doc = parse_from_mongo(me_doc)
+        target_doc = parse_from_mongo(target_doc)
+        
+        payload = {
+            "follower_id": current_user.id,
+            "following_id": target_user_id,
+            "following": True,
+            "follower_counts": {
+                "following_count": me_doc.get("following_count", 0)
+            },
+            "following_counts": {
+                "followers_count": target_doc.get("followers_count", 0)
+            }
+        }
+        await sio.emit('follow_updated', payload, room=f"user_{target_user_id}")
+        await sio.emit('follow_updated', payload, room=f"user_{current_user.id}")
+
+        return {"following": True, "followers_count": target_doc.get("followers_count", 0)}
+
+@api_router.get("/users/{username}/is-following")
+async def is_following(username: str, current_user: User = Depends(get_current_user)):
+    target_user_doc = await db.users.find_one({"username": username})
+    if not target_user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    target_user_id = target_user_doc["id"]
+
+    existing_follow = await db.follows.find_one({
+        "follower_id": current_user.id,
+        "following_id": target_user_id
+    })
+    return {"following": existing_follow is not None}
 
 # Message Routes
 @api_router.get("/conversations")

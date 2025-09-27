@@ -41,6 +41,7 @@ const SearchPage = () => {
   }, []);
 
   const performSearch = async (searchQuery) => {
+    setSelectedIndex(-1);
     if (!searchQuery.trim()) {
       setResults({ users: [], posts: [] });
       return;
@@ -90,32 +91,75 @@ const SearchPage = () => {
     }
   };
 
-  const UserResult = ({ user, isSelected, onClick }) => (
-    <div 
-      className={`flex items-center space-x-3 p-4 rounded-lg cursor-pointer transition-colors ${
-        isSelected ? 'bg-purple-50 dark:bg-purple-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-      }`}
-      onClick={onClick}
-    >
-      <Avatar className="h-12 w-12">
-        <AvatarImage src={user.avatar} />
-        <AvatarFallback>{user.name[0]?.toUpperCase()}</AvatarFallback>
-      </Avatar>
-      <div className="flex-1">
-        <h3 className="font-semibold text-gray-900 dark:text-gray-100">{user.name}</h3>
-        <p className="text-gray-600 dark:text-gray-400">@{user.username}</p>
-        {user.bio && (
-          <p className="text-sm text-gray-500 dark:text-gray-500 mt-1 line-clamp-2">
-            {user.bio}
-          </p>
-        )}
-        <div className="flex items-center space-x-4 mt-2 text-sm text-gray-500">
-          <span>{user.followers_count} {t('profile.followers')}</span>
-          <span>{user.following_count} {t('profile.following')}</span>
+  const UserResult = ({ user, isSelected, onClick }) => {
+    const [isFollowing, setIsFollowing] = useState(false);
+    const [counts, setCounts] = useState({ followers: user.followers_count, following: user.following_count });
+
+    useEffect(() => {
+      // socket live updates
+      const handler = (data) => {
+        if (data?.following_id === user.id) {
+          setCounts((prev) => ({ ...prev, followers: data?.following_counts?.followers_count ?? prev.followers }));
+        }
+        if (data?.follower_id === user.id) {
+          setCounts((prev) => ({ ...prev, following: data?.follower_counts?.following_count ?? prev.following }));
+        }
+      };
+      if (window.__emergent_socketio) {
+        window.__emergent_socketio.on('follow_updated', handler);
+      }
+      return () => {
+        if (window.__emergent_socketio) {
+          window.__emergent_socketio.off('follow_updated', handler);
+        }
+      };
+    }, [user.id]);
+
+    const handleFollowToggle = async (e) => {
+      e.stopPropagation();
+      try {
+        const resp = await axios.post(`${API}/users/${user.username}/follow`);
+        const following = resp.data.following;
+        const followersCount = resp.data.followers_count ?? (counts.followers + (following ? 1 : -1));
+        setIsFollowing(following);
+        setCounts((prev) => ({ ...prev, followers: followersCount }));
+      } catch (err) {
+        console.error('Follow toggle failed', err);
+      }
+    };
+
+    return (
+      <div 
+        className={`flex items-center space-x-3 p-4 rounded-lg cursor-pointer transition-colors ${
+          isSelected ? 'bg-purple-50 dark:bg-purple-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+        }`}
+        onClick={onClick}
+      >
+        <Avatar className="h-12 w-12">
+          <AvatarImage src={user.avatar} />
+          <AvatarFallback>{user.name[0]?.toUpperCase()}</AvatarFallback>
+        </Avatar>
+        <div className="flex-1">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">{user.name}</h3>
+          <p className="text-gray-600 dark:text-gray-400">@{user.username}</p>
+          {user.bio && (
+            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1 line-clamp-2">
+              {user.bio}
+            </p>
+          )}
+          <div className="flex items-center space-x-4 mt-2 text-sm text-gray-500">
+            <span>{counts.followers} {t('profile.followers')}</span>
+            <span>{counts.following} {t('profile.following')}</span>
+          </div>
+        </div>
+        <div>
+          <Button size="sm" variant={isFollowing ? 'outline' : 'default'} onClick={handleFollowToggle}>
+            {isFollowing ? t('profile.unfollow') : t('profile.follow')}
+          </Button>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const PostResult = ({ post, author, isSelected, onClick }) => (
     <div 

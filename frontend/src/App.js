@@ -35,6 +35,7 @@ import SearchPage from "./pages/SearchPage";
 import MessagesPage from "./pages/MessagesPage";
 import ComposePage from "./pages/ComposePage";
 import AdminPage from "./pages/AdminPage";
+import ProfilePage from "./pages/ProfilePage";
 import { TermsPage, PrivacyPage, ImprintPage, CookieBanner } from "./pages/LegalPages";
 
 // Hooks
@@ -91,10 +92,23 @@ const AuthProvider = ({ children }) => {
       socket.emit('join_user', { user_id: user.id });
     });
 
+    // expose for optional listeners
+    window.__emergent_socketio = socket;
+
     socket.on('notification', (data) => {
       toast.info(data.notification.message);
     });
+
+    socket.on('follow_updated', (data) => {
+      // components can react; no-op here
+    });
   };
+    if (socket) {
+      socket.on('follow_updated', (data) => {
+        // noop here; components that need will listen globally through window or context later
+      });
+    }
+
 
   const fetchCurrentUser = async () => {
     try {
@@ -1710,7 +1724,7 @@ const AppContent = () => {
           <Route path="/messages" element={<MessagesPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/compose" element={<ComposePage />} />
-          <Route path="/@:username" element={<UserProfileWrapper />} />
+          <Route path="/@:username" element={<ProfilePage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />

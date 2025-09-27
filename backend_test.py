@@ -7,7 +7,7 @@ from datetime import datetime
 import uuid
 
 class KrafinkAPITester:
-    def __init__(self, base_url="https://krafthub.preview.emergentagent.com"):
+    def __init__(self, base_url="https://krafink-social.preview.emergentagent.com"):
         self.base_url = base_url
         self.api_url = f"{base_url}/api"
         self.token = None
@@ -287,6 +287,334 @@ class KrafinkAPITester:
         
         return False, False
 
+    def create_test_image(self):
+        """Create a small test image in memory"""
+        from PIL import Image
+        import io
+        
+        # Create a small 100x100 red image
+        img = Image.new('RGB', (100, 100), color='red')
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='JPEG')
+        img_bytes.seek(0)
+        return img_bytes.getvalue()
+
+    def test_profiles_milestone_comprehensive(self):
+        """Comprehensive test for Profiles milestone backend endpoints"""
+        print("\n🎯 Starting Profiles Milestone Comprehensive Test")
+        print("=" * 60)
+        
+        # Step 1: Register specific user as requested
+        user_data = {
+            "email": "user1+profiles@example.com",
+            "username": "user1profiles", 
+            "name": "User One",
+            "password": "Pass123!"
+        }
+        
+        print("Step 1: Registering user...")
+        success, response = self.run_test(
+            "Register User1 for Profiles Test",
+            "POST", 
+            "auth/register",
+            200,
+            data=user_data
+        )
+        
+        if not success:
+            print("❌ Registration failed, stopping profiles test")
+            return False
+            
+        # Store token for subsequent calls
+        if 'access_token' in response:
+            self.token = response['access_token']
+            self.current_user = response['user']
+            print(f"✅ User registered with ID: {self.current_user.get('id')}")
+        else:
+            print("❌ No access token in registration response")
+            return False
+        
+        # Step 2: Set Authorization header (already done via self.token)
+        print("Step 2: Authorization header set")
+        
+        # Step 3: GET /api/auth/me
+        print("Step 3: Testing GET /api/auth/me...")
+        success, me_response = self.run_test(
+            "Get Current User Profile",
+            "GET",
+            "auth/me", 
+            200
+        )
+        
+        if success:
+            # Verify required fields
+            required_fields = ['id', 'username', 'name', 'links']
+            missing_fields = []
+            for field in required_fields:
+                if field not in me_response:
+                    missing_fields.append(field)
+            
+            if missing_fields:
+                self.log_test("Verify /auth/me fields", False, f"Missing fields: {missing_fields}")
+            else:
+                self.log_test("Verify /auth/me fields", True)
+                print(f"✅ User fields verified: {list(me_response.keys())}")
+        
+        # Step 4: PUT /api/users/profile with links
+        print("Step 4: Testing profile update with links...")
+        profile_update_data = {
+            "name": "User One Updated",
+            "bio": "Bio for user one", 
+            "links": [
+                {"label": "Site", "url": "https://example.com"},
+                {"label": "GitHub", "url": "github.com/u1"}
+            ],
+            "avatar": None,
+            "banner": None
+        }
+        
+        success, profile_response = self.run_test(
+            "Update Profile with Links",
+            "PUT",
+            "users/profile",
+            200,
+            data=profile_update_data
+        )
+        
+        if success:
+            # Verify response contains updated data
+            if profile_response.get('name') == "User One Updated":
+                self.log_test("Profile name update", True)
+            else:
+                self.log_test("Profile name update", False, f"Expected 'User One Updated', got {profile_response.get('name')}")
+            
+            # Verify links array
+            links = profile_response.get('links', [])
+            if isinstance(links, list) and len(links) == 2:
+                self.log_test("Profile links update", True)
+                print(f"✅ Links updated: {links}")
+            else:
+                self.log_test("Profile links update", False, f"Expected 2 links, got {links}")
+        
+        # Step 5: Upload image
+        print("Step 5: Testing image upload...")
+        try:
+            import requests
+            
+            # Create test image
+            image_data = self.create_test_image()
+            
+            # Upload image using multipart/form-data
+            files = {'file': ('test.jpg', image_data, 'image/jpeg')}
+            headers = {'Authorization': f'Bearer {self.token}'}
+            
+            upload_response = requests.post(
+                f"{self.api_url}/upload/image",
+                files=files,
+                headers=headers,
+                timeout=10
+            )
+            
+            if upload_response.status_code == 200:
+                upload_data = upload_response.json()
+                if 'url' in upload_data and upload_data['url'].startswith('/uploads/'):
+                    self.log_test("Image Upload", True)
+                    uploaded_url = upload_data['url']
+                    print(f"✅ Image uploaded: {uploaded_url}")
+                else:
+                    self.log_test("Image Upload", False, f"Invalid upload response: {upload_data}")
+                    uploaded_url = None
+            else:
+                self.log_test("Image Upload", False, f"Upload failed with status {upload_response.status_code}: {upload_response.text}")
+                uploaded_url = None
+                
+        except Exception as e:
+            self.log_test("Image Upload", False, f"Upload exception: {str(e)}")
+            uploaded_url = None
+        
+        # Step 6: Update profile with avatar and banner
+        if uploaded_url:
+            print("Step 6: Testing profile update with avatar/banner...")
+            avatar_banner_data = {
+                "avatar": uploaded_url,
+                "banner": uploaded_url
+            }
+            
+            success, avatar_response = self.run_test(
+                "Update Profile with Avatar/Banner",
+                "PUT",
+                "users/profile",
+                200,
+                data=avatar_banner_data
+            )
+            
+            if success:
+                if avatar_response.get('avatar') == uploaded_url and avatar_response.get('banner') == uploaded_url:
+                    self.log_test("Avatar/Banner Update", True)
+                    print(f"✅ Avatar and banner set to: {uploaded_url}")
+                else:
+                    self.log_test("Avatar/Banner Update", False, f"Avatar: {avatar_response.get('avatar')}, Banner: {avatar_response.get('banner')}")
+        else:
+            print("⚠️ Skipping avatar/banner update due to upload failure")
+        
+        # Step 7: Create two posts
+        print("Step 7: Creating test posts...")
+        
+        # First post with image
+        post1_data = {
+            "content": "My first post #intro",
+            "images": [uploaded_url] if uploaded_url else [],
+            "visibility": "public",
+            "hashtags": ["intro"],
+            "mentions": []
+        }
+        
+        success1, post1_response = self.run_test(
+            "Create First Post",
+            "POST",
+            "posts",
+            200,
+            data=post1_data
+        )
+        
+        post1_id = post1_response.get('id') if success1 else None
+        
+        # Second post without image
+        post2_data = {
+            "content": "Second post",
+            "images": [],
+            "visibility": "public", 
+            "hashtags": [],
+            "mentions": []
+        }
+        
+        success2, post2_response = self.run_test(
+            "Create Second Post",
+            "POST",
+            "posts",
+            200,
+            data=post2_data
+        )
+        
+        post2_id = post2_response.get('id') if success2 else None
+        
+        if success1 and success2:
+            print(f"✅ Created posts with IDs: {post1_id}, {post2_id}")
+        
+        # Step 8: Fetch user posts
+        print("Step 8: Testing user posts endpoint...")
+        success, posts_response = self.run_test(
+            "Get User Posts",
+            "GET",
+            f"users/user1profiles/posts?limit=50",
+            200
+        )
+        
+        if success:
+            if isinstance(posts_response, list):
+                self.log_test("User Posts Response Type", True)
+                print(f"✅ Retrieved {len(posts_response)} posts")
+                
+                # Verify post structure
+                if len(posts_response) >= 2:
+                    self.log_test("User Posts Count", True, f"Found {len(posts_response)} posts")
+                    
+                    # Check first post structure
+                    first_post = posts_response[0]
+                    required_keys = ['post', 'author', 'user_liked', 'user_saved']
+                    if all(key in first_post for key in required_keys):
+                        self.log_test("Post Structure", True)
+                        
+                        # Verify author username
+                        author = first_post.get('author', {})
+                        if author.get('username') == 'user1profiles':
+                            self.log_test("Post Author Username", True)
+                        else:
+                            self.log_test("Post Author Username", False, f"Expected 'user1profiles', got {author.get('username')}")
+                        
+                        # Check images format
+                        post_data = first_post.get('post', {})
+                        images = post_data.get('images', [])
+                        if images:
+                            valid_images = all(isinstance(img, str) and img.startswith('/uploads') for img in images)
+                            if valid_images:
+                                self.log_test("Post Images Format", True)
+                            else:
+                                self.log_test("Post Images Format", False, f"Invalid image format: {images}")
+                        else:
+                            self.log_test("Post Images Format", True, "No images to validate")
+                            
+                    else:
+                        missing_keys = [key for key in required_keys if key not in first_post]
+                        self.log_test("Post Structure", False, f"Missing keys: {missing_keys}")
+                else:
+                    self.log_test("User Posts Count", False, f"Expected >= 2 posts, got {len(posts_response)}")
+            else:
+                self.log_test("User Posts Response Type", False, f"Expected list, got {type(posts_response)}")
+        
+        # Step 9: GET user by username
+        print("Step 9: Testing GET user by username...")
+        success, user_response = self.run_test(
+            "Get User by Username",
+            "GET",
+            "users/user1profiles",
+            200
+        )
+        
+        if success:
+            # Verify links array preserved
+            links = user_response.get('links', [])
+            if isinstance(links, list) and len(links) == 2:
+                # Check if links have label/url structure
+                valid_links = True
+                for link in links:
+                    if isinstance(link, dict):
+                        if 'label' not in link or 'url' not in link:
+                            valid_links = False
+                            break
+                    elif not isinstance(link, str):
+                        valid_links = False
+                        break
+                
+                if valid_links:
+                    self.log_test("User Links Preserved", True)
+                else:
+                    self.log_test("User Links Preserved", False, f"Invalid link structure: {links}")
+            else:
+                self.log_test("User Links Preserved", False, f"Expected 2 links, got {links}")
+            
+            # Verify avatar/banner present
+            avatar = user_response.get('avatar')
+            banner = user_response.get('banner')
+            if avatar and banner:
+                self.log_test("Avatar/Banner Present", True)
+                print(f"✅ Avatar: {avatar}, Banner: {banner}")
+            else:
+                self.log_test("Avatar/Banner Present", False, f"Avatar: {avatar}, Banner: {banner}")
+        
+        # Step 10: Test followers endpoint
+        print("Step 10: Testing followers endpoint...")
+        user_id = self.current_user.get('id')
+        if user_id:
+            success, followers_response = self.run_test(
+                "Get User Followers",
+                "GET",
+                f"users/{user_id}/followers",
+                200
+            )
+            
+            if success:
+                if isinstance(followers_response, list):
+                    self.log_test("Followers Response Type", True)
+                    print(f"✅ Followers endpoint returned array with {len(followers_response)} followers")
+                else:
+                    self.log_test("Followers Response Type", False, f"Expected list, got {type(followers_response)}")
+        else:
+            self.log_test("Get User Followers", False, "No user ID available")
+        
+        print("\n🎯 Profiles Milestone Test Complete")
+        return True
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting Krafink API Testing Suite")
@@ -336,6 +664,318 @@ class KrafinkAPITester:
         
         return self.get_results()
 
+    def test_follow_milestone_comprehensive(self):
+        """Comprehensive test for Follow milestone backend endpoints"""
+        print("\n🎯 Starting Follow Milestone Comprehensive Test")
+        print("=" * 60)
+        
+        # Step 1: Register User A (follower)
+        timestamp = datetime.now().strftime('%H%M%S')
+        user_a_data = {
+            "email": f"alice.follower{timestamp}@example.com",
+            "username": f"alice{timestamp}",
+            "name": f"Alice Follower {timestamp}",
+            "password": "SecurePass123!"
+        }
+        
+        print("Step 1: Registering User A (follower)...")
+        success, response = self.run_test(
+            "Register User A (Follower)",
+            "POST",
+            "auth/register",
+            200,
+            data=user_a_data
+        )
+        
+        if not success:
+            print("❌ User A registration failed, stopping follow test")
+            return False
+            
+        # Store User A token
+        user_a_token = response.get('access_token')
+        user_a_info = response.get('user')
+        if not user_a_token:
+            print("❌ No access token for User A")
+            return False
+        
+        print(f"✅ User A registered: {user_a_info.get('username')} (ID: {user_a_info.get('id')})")
+        
+        # Step 2: Register User B (followee)
+        user_b_data = {
+            "email": f"bob.followee{timestamp}@example.com",
+            "username": f"bob{timestamp}",
+            "name": f"Bob Followee {timestamp}",
+            "password": "SecurePass123!"
+        }
+        
+        print("Step 2: Registering User B (followee)...")
+        success, response = self.run_test(
+            "Register User B (Followee)",
+            "POST",
+            "auth/register",
+            200,
+            data=user_b_data
+        )
+        
+        if not success:
+            print("❌ User B registration failed, stopping follow test")
+            return False
+            
+        # Store User B token
+        user_b_token = response.get('access_token')
+        user_b_info = response.get('user')
+        if not user_b_token:
+            print("❌ No access token for User B")
+            return False
+        
+        print(f"✅ User B registered: {user_b_info.get('username')} (ID: {user_b_info.get('id')})")
+        
+        # Step 3: User A follows User B
+        print("Step 3: User A follows User B...")
+        self.token = user_a_token  # Set User A's token
+        
+        success, follow_response = self.run_test(
+            "User A Follows User B",
+            "POST",
+            f"users/{user_b_info.get('username')}/follow",
+            200
+        )
+        
+        if success:
+            # Verify response structure
+            if 'following' in follow_response and 'followers_count' in follow_response:
+                if follow_response['following'] == True:
+                    self.log_test("Follow Response - Following Status", True)
+                    print(f"✅ Following status: {follow_response['following']}")
+                else:
+                    self.log_test("Follow Response - Following Status", False, f"Expected True, got {follow_response['following']}")
+                
+                followers_count = follow_response['followers_count']
+                if isinstance(followers_count, int) and followers_count >= 1:
+                    self.log_test("Follow Response - Followers Count", True)
+                    print(f"✅ User B followers count: {followers_count}")
+                else:
+                    self.log_test("Follow Response - Followers Count", False, f"Expected int >= 1, got {followers_count}")
+            else:
+                self.log_test("Follow Response Structure", False, f"Missing keys in response: {follow_response}")
+        else:
+            print("❌ Follow operation failed")
+            return False
+        
+        # Step 4: Verify database state - check User B's followers list
+        print("Step 4: Verifying User B's followers list includes User A...")
+        success, followers_response = self.run_test(
+            "Get User B Followers List",
+            "GET",
+            f"users/{user_b_info.get('id')}/followers",
+            200
+        )
+        
+        if success:
+            if isinstance(followers_response, list):
+                # Check if User A is in the followers list
+                user_a_found = False
+                for follower in followers_response:
+                    if follower.get('id') == user_a_info.get('id'):
+                        user_a_found = True
+                        break
+                
+                if user_a_found:
+                    self.log_test("User A in User B Followers List", True)
+                    print(f"✅ User A found in User B's followers list")
+                else:
+                    self.log_test("User A in User B Followers List", False, f"User A not found in followers list: {[f.get('username') for f in followers_response]}")
+            else:
+                self.log_test("Followers List Response Type", False, f"Expected list, got {type(followers_response)}")
+        
+        # Step 5: Test is-following endpoint
+        print("Step 5: Testing is-following endpoint...")
+        success, is_following_response = self.run_test(
+            "Check User A is Following User B",
+            "GET",
+            f"users/{user_b_info.get('username')}/is-following",
+            200
+        )
+        
+        if success:
+            if 'following' in is_following_response:
+                if is_following_response['following'] == True:
+                    self.log_test("Is-Following Response", True)
+                    print(f"✅ Is-following status: {is_following_response['following']}")
+                else:
+                    self.log_test("Is-Following Response", False, f"Expected True, got {is_following_response['following']}")
+            else:
+                self.log_test("Is-Following Response Structure", False, f"Missing 'following' key: {is_following_response}")
+        
+        # Step 6: User A unfollows User B
+        print("Step 6: User A unfollows User B...")
+        success, unfollow_response = self.run_test(
+            "User A Unfollows User B",
+            "POST",
+            f"users/{user_b_info.get('username')}/follow",
+            200
+        )
+        
+        if success:
+            # Verify unfollow response
+            if 'following' in unfollow_response and 'followers_count' in unfollow_response:
+                if unfollow_response['following'] == False:
+                    self.log_test("Unfollow Response - Following Status", True)
+                    print(f"✅ Following status after unfollow: {unfollow_response['following']}")
+                else:
+                    self.log_test("Unfollow Response - Following Status", False, f"Expected False, got {unfollow_response['following']}")
+                
+                followers_count_after = unfollow_response['followers_count']
+                expected_count = followers_count - 1
+                if followers_count_after == expected_count:
+                    self.log_test("Unfollow Response - Followers Count Decreased", True)
+                    print(f"✅ User B followers count decreased to: {followers_count_after}")
+                else:
+                    self.log_test("Unfollow Response - Followers Count Decreased", False, f"Expected {expected_count}, got {followers_count_after}")
+            else:
+                self.log_test("Unfollow Response Structure", False, f"Missing keys in response: {unfollow_response}")
+        
+        # Step 7: Verify followers list after unfollow
+        print("Step 7: Verifying User B's followers list after unfollow...")
+        success, followers_after_response = self.run_test(
+            "Get User B Followers List After Unfollow",
+            "GET",
+            f"users/{user_b_info.get('id')}/followers",
+            200
+        )
+        
+        if success:
+            if isinstance(followers_after_response, list):
+                # Check if User A is no longer in the followers list
+                user_a_found_after = False
+                for follower in followers_after_response:
+                    if follower.get('id') == user_a_info.get('id'):
+                        user_a_found_after = True
+                        break
+                
+                if not user_a_found_after:
+                    self.log_test("User A Removed from User B Followers List", True)
+                    print(f"✅ User A successfully removed from User B's followers list")
+                else:
+                    self.log_test("User A Removed from User B Followers List", False, f"User A still found in followers list")
+            else:
+                self.log_test("Followers List After Unfollow Response Type", False, f"Expected list, got {type(followers_after_response)}")
+        
+        # Step 8: Verify counts update - check both users' profiles
+        print("Step 8: Verifying follower/following counts on user profiles...")
+        
+        # Check User A's following count (should be 0)
+        success, user_a_profile = self.run_test(
+            "Get User A Profile for Count Check",
+            "GET",
+            f"users/{user_a_info.get('username')}",
+            200
+        )
+        
+        if success:
+            following_count = user_a_profile.get('following_count', 0)
+            if following_count == 0:
+                self.log_test("User A Following Count", True)
+                print(f"✅ User A following count: {following_count}")
+            else:
+                self.log_test("User A Following Count", False, f"Expected 0, got {following_count}")
+        
+        # Check User B's followers count (should be 0)
+        success, user_b_profile = self.run_test(
+            "Get User B Profile for Count Check",
+            "GET",
+            f"users/{user_b_info.get('username')}",
+            200
+        )
+        
+        if success:
+            followers_count_profile = user_b_profile.get('followers_count', 0)
+            if followers_count_profile == 0:
+                self.log_test("User B Followers Count", True)
+                print(f"✅ User B followers count: {followers_count_profile}")
+            else:
+                self.log_test("User B Followers Count", False, f"Expected 0, got {followers_count_profile}")
+        
+        # Step 9: Test socket emission (verify endpoint doesn't error and returns counts)
+        print("Step 9: Testing socket emission (endpoint functionality)...")
+        
+        # Follow again to test socket emission
+        success, follow_socket_response = self.run_test(
+            "Follow for Socket Emission Test",
+            "POST",
+            f"users/{user_b_info.get('username')}/follow",
+            200
+        )
+        
+        if success:
+            # Verify the endpoint returns proper counts (socket emission can't be tested via HTTP)
+            if 'following' in follow_socket_response and 'followers_count' in follow_socket_response:
+                self.log_test("Socket Emission Endpoint - Response Structure", True)
+                print("✅ Follow endpoint returns proper structure for socket emission")
+                
+                # Verify the counts are correct
+                if follow_socket_response['following'] == True and follow_socket_response['followers_count'] >= 1:
+                    self.log_test("Socket Emission Endpoint - Count Values", True)
+                    print(f"✅ Socket emission endpoint returns correct counts: following={follow_socket_response['following']}, followers_count={follow_socket_response['followers_count']}")
+                else:
+                    self.log_test("Socket Emission Endpoint - Count Values", False, f"Incorrect count values: {follow_socket_response}")
+            else:
+                self.log_test("Socket Emission Endpoint - Response Structure", False, f"Missing required fields: {follow_socket_response}")
+        
+        # Step 10: Test edge cases
+        print("Step 10: Testing edge cases...")
+        
+        # Test following yourself (should fail)
+        success, self_follow_response = self.run_test(
+            "Test Self-Follow (Should Fail)",
+            "POST",
+            f"users/{user_a_info.get('username')}/follow",
+            400  # Expecting 400 error
+        )
+        
+        if success:
+            self.log_test("Self-Follow Prevention", True)
+            print("✅ Self-follow correctly prevented")
+        else:
+            self.log_test("Self-Follow Prevention", False, "Self-follow should return 400 error")
+        
+        # Test following non-existent user
+        success, nonexistent_follow_response = self.run_test(
+            "Test Follow Non-existent User (Should Fail)",
+            "POST",
+            f"users/nonexistentuser{timestamp}/follow",
+            404  # Expecting 404 error
+        )
+        
+        if success:
+            self.log_test("Non-existent User Follow Prevention", True)
+            print("✅ Non-existent user follow correctly prevented")
+        else:
+            self.log_test("Non-existent User Follow Prevention", False, "Non-existent user follow should return 404 error")
+        
+        print("\n🎯 Follow Milestone Test Complete")
+        return True
+
+    def run_profiles_milestone_test(self):
+        """Run only the Profiles milestone comprehensive test"""
+        print("🚀 Starting Profiles Milestone Test Suite")
+        print("=" * 50)
+        
+        # Run the comprehensive profiles test
+        self.test_profiles_milestone_comprehensive()
+        
+        return self.get_results()
+    
+    def run_follow_milestone_test(self):
+        """Run only the Follow milestone comprehensive test"""
+        print("🚀 Starting Follow Milestone Test Suite")
+        print("=" * 50)
+        
+        # Run the comprehensive follow test
+        self.test_follow_milestone_comprehensive()
+        
+        return self.get_results()
+
     def get_results(self):
         """Get test results summary"""
         print("\n" + "=" * 50)
@@ -356,7 +996,9 @@ class KrafinkAPITester:
 def main():
     """Main test execution"""
     tester = KrafinkAPITester()
-    results = tester.run_all_tests()
+    
+    # Run the specific Follow milestone test as requested
+    results = tester.run_follow_milestone_test()
     
     # Return appropriate exit code
     return 0 if results["passed_tests"] == results["total_tests"] else 1
